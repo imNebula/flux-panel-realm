@@ -16,7 +16,8 @@ import (
 	"github.com/imnebula/flux-panel-realm/realm-agent/internal/reporter"
 )
 
-var version = "2.0.0"
+// Version is set at build time via -ldflags "-X main.Version=x.y.z-realm"
+var Version = "dev"
 
 func main() {
 	var cfg agent.Config
@@ -39,7 +40,7 @@ func main() {
 	flag.Parse()
 
 	if cfg.PrintVersion {
-		fmt.Printf("flux-realm-agent %s\n", version)
+		fmt.Printf("flux-realm-agent %s\n", Version)
 		return
 	}
 	if cfg.ServerAddr == "" || cfg.Secret == "" {
@@ -74,7 +75,7 @@ func main() {
 	r := reporter.New(reporter.Config{
 		ServerAddr:       cfg.ServerAddr,
 		Secret:           cfg.Secret,
-		AgentVersion:     version,
+		AgentVersion:     Version,
 		AgentProcessName: cfg.AgentProcessName,
 		AgentName:        cfg.AgentName,
 		ServiceName:      cfg.ServiceName,
