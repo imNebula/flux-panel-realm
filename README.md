@@ -1,7 +1,7 @@
 # flux-panel-realm 转发面板
 
 本仓库是 [bqlpfy/flux-panel](https://github.com/bqlpfy/flux-panel) 的衍生版本。感谢原作者的开源贡献。  
-原项目基于 Gost 实现，本项目已将其核心组件完全迁移为基于 [zhboner/realm](https://github.com/zhboner/realm) v2 的转发面板。节点运行时由 Gost 替换为高性能的 `flux-realm-agent`，并将旧版 Gost 的配置及 API 通过兼容层映射为 Realm endpoints。
+原项目基于 Gost 实现，本项目已将其核心组件完全迁移为基于 [zhboner/realm](https://github.com/zhboner/realm) v2 的转发面板。底层服务与节点通信彻底摆脱了遗留 Gost 协议的束缚，通过 WebSocket 实现了原生的 Realm 配置动态下发与应用。
 
 ---
 
@@ -12,7 +12,6 @@
 - **资源限制**：支持按 **隧道账号级别** 管理流量转发数量，可用于用户/隧道配额控制。
 - **协议支持**：支持 **TCP** 和 **UDP** 协议的转发。
 - **多种模式**：支持两种转发模式：**端口转发** 与 **隧道转发**。
-- **限速功能**：可针对 **指定用户的指定隧道进行限速** 设置。
 - **流量计费**：支持配置 **单向或双向流量计费方式**，灵活适配不同计费模型。
 
 ---

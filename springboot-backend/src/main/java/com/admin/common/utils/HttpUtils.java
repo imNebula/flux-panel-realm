@@ -1,7 +1,7 @@
 package com.admin.common.utils;
 
 
-import com.admin.common.dto.GostDto;
+import com.admin.common.dto.WsResult;
 import com.admin.config.RestTemplateConfig;
 import com.alibaba.fastjson.JSONObject;
 import lombok.SneakyThrows;

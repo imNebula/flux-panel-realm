@@ -1,7 +1,6 @@
 package com.admin.common.task;
 
 
-import com.admin.common.utils.WebSocketServer;
 import com.admin.entity.Forward;
 import com.admin.entity.Tunnel;
 import com.admin.entity.User;
@@ -10,7 +9,6 @@ import com.admin.service.ForwardService;
 import com.admin.service.TunnelService;
 import com.admin.service.UserService;
 import com.admin.service.UserTunnelService;
-import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import lombok.extern.slf4j.Slf4j;
@@ -39,6 +37,9 @@ public class ResetFlowAsync {
 
     @Resource
     TunnelService tunnelService;
+
+    @Resource
+    private com.admin.common.task.RealmConfigSyncAsync realmConfigSyncAsync;
 
     /**
      * 每天0点执行流量重置任务
@@ -233,18 +234,9 @@ public class ResetFlowAsync {
         Tunnel tunnel = tunnelService.getById(forward.getTunnelId());
         if (tunnel == null) return;
 
-        JSONObject cmd = new JSONObject();
-        cmd.put("forward_id", forward.getId());
-        try {
-            WebSocketServer.send_msg(tunnel.getInNodeId(), cmd, "PauseForward");
-            if (tunnel.getType() == 2) {
-                WebSocketServer.send_msg(tunnel.getOutNodeId(), cmd, "PauseForward");
-            }
-        } catch (Exception ignored) {}
-    }
-
-
-    private String buildServiceName(Long forwardId, Integer userId, Integer userTunnelId) {
-        return forwardId + "_" + userId + "_" + userTunnelId;
+        realmConfigSyncAsync.syncNodeConfig(tunnel.getInNodeId());
+        if (tunnel.getType() == 2 && tunnel.getOutNodeId() != null){
+            realmConfigSyncAsync.syncNodeConfig(tunnel.getOutNodeId());
+        }
     }
 }

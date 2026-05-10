@@ -5,7 +5,6 @@ import com.admin.common.dto.UserTunnelQueryDto;
 import com.admin.common.dto.UserTunnelUpdateDto;
 import com.admin.common.dto.UserTunnelWithDetailDto;
 import com.admin.common.lang.R;
-import com.admin.common.utils.WebSocketServer;
 import com.admin.entity.UserTunnel;
 import com.admin.mapper.TunnelMapper;
 import com.admin.mapper.UserTunnelMapper;
@@ -21,6 +20,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.admin.common.task.RealmConfigSyncAsync;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
@@ -71,6 +71,9 @@ public class UserTunnelServiceImpl extends ServiceImpl<UserTunnelMapper, UserTun
     
     @Autowired
     private NodeService nodeService;
+
+    @Resource
+    private RealmConfigSyncAsync realmConfigSyncAsync;
 
     // ========== 公共接口实现 ==========
 
@@ -250,13 +253,6 @@ public class UserTunnelServiceImpl extends ServiceImpl<UserTunnelMapper, UserTun
     }
     
 
-    
-    /**
-     * 删除用户在指定隧道下的所有转发
-     * 
-     * @param userId 用户ID
-     * @param tunnelId 隧道ID
-     */
     private void removeUserTunnelForwards(Integer userId, Integer tunnelId) {
         // 查询该用户在该隧道下的所有转发
         QueryWrapper<Forward> queryWrapper = new QueryWrapper<>();
@@ -265,56 +261,17 @@ public class UserTunnelServiceImpl extends ServiceImpl<UserTunnelMapper, UserTun
         List<Forward> userTunnelForwards = forwardService.list(queryWrapper);
 
         if (!userTunnelForwards.isEmpty()) {
-            // 获取用户隧道权限信息，用于构建服务名称
-            UserTunnel userTunnel = getUserTunnelByUserAndTunnel(userId, tunnelId);
-
             for (Forward forward : userTunnelForwards) {
-                try {
-                    // 通知节点重载配置（删除 DB 记录后 realm-agent 自动移除该转发）
-                    stopForwardService(forward, userId, userTunnel != null ? userTunnel.getId() : 0);
-
-                    // 然后删除数据库记录
-                    forwardService.removeById(forward.getId());
-
-                } catch (Exception e) {
-                    // 单个转发删除失败，记录错误但继续处理其他转发
+                forwardService.removeById(forward.getId());
+            }
+            Tunnel tunnel = tunnelService.getById(tunnelId);
+            if (tunnel != null) {
+                realmConfigSyncAsync.syncNodeConfig(tunnel.getInNodeId());
+                if (tunnel.getType() == 2 && tunnel.getOutNodeId() != null) {
+                    realmConfigSyncAsync.syncNodeConfig(tunnel.getOutNodeId());
                 }
             }
-
         }
-    }
-    
-    /**
-     * 删除转发服务（按创建的反向顺序删除：主服务 -> 远端服务 -> 转发链）
-     * 
-     * @param forward 转发对象
-     * @param userId 用户ID
-     * @param userTunnelId 用户隧道ID
-     */
-    private void stopForwardService(Forward forward, Integer userId, Integer userTunnelId) {
-        try {
-            Tunnel tunnel = tunnelService.getById(forward.getTunnelId());
-            if (tunnel == null) return;
-
-            // 通知入口节点重载配置（删除 DB 记录后 agent 下次心跳自动移除该转发）
-            Long inNodeId = tunnel.getInNodeId();
-            Long outNodeId = tunnel.getOutNodeId();
-            sendApplyConfig(inNodeId);
-            if (outNodeId != null && !outNodeId.equals(inNodeId)) {
-                sendApplyConfig(outNodeId);
-            }
-        } catch (Exception e) {
-            throw new RuntimeException("通知节点失败，转发ID：" + forward.getId() + "，错误：" + e.getMessage(), e);
-        }
-    }
-
-    private void sendApplyConfig(Long nodeId) {
-        if (nodeId == null) return;
-        try {
-            com.alibaba.fastjson.JSONObject cmd = new com.alibaba.fastjson.JSONObject();
-            cmd.put("action", "reload");
-            WebSocketServer.send_msg(nodeId, cmd, "ApplyConfig");
-        } catch (Exception ignored) {}
     }
     
     /**
@@ -332,18 +289,6 @@ public class UserTunnelServiceImpl extends ServiceImpl<UserTunnelMapper, UserTun
         } catch (Exception e) {
             return null;
         }
-    }
-    
-    /**
-     * 构建服务名称
-     * 
-     * @param forwardId 转发ID
-     * @param userId 用户ID
-     * @param userTunnelId 用户隧道ID
-     * @return 服务名称
-     */
-    private String buildServiceName(Long forwardId, Long userId, Integer userTunnelId) {
-        return forwardId + "_" + userId + "_" + userTunnelId;
     }
 
 
@@ -384,35 +329,7 @@ public class UserTunnelServiceImpl extends ServiceImpl<UserTunnelMapper, UserTun
      * @param speedId 新的限速规则ID
      */
     private void updateUserTunnelForwardsSpeed(Integer userId, Integer tunnelId, Integer speedId) {
-        // 1. 查询该用户在该隧道下的所有转发
-        QueryWrapper<Forward> queryWrapper = new QueryWrapper<>();
-        queryWrapper.eq("user_id", userId).eq("tunnel_id", tunnelId);
-        List<Forward> userTunnelForwards = forwardService.list(queryWrapper);
-
-        if (userTunnelForwards.isEmpty()) {
-            return;
-        }
-
-        // 2. 获取隧道信息
-        Tunnel tunnel = tunnelService.getById(tunnelId);
-        if (tunnel == null) {
-            return;
-        }
-
-        // 3. 获取用户隧道权限信息
-        UserTunnel userTunnel = getUserTunnelByUserAndTunnel(userId, tunnelId);
-        if (userTunnel == null) {
-            return;
-        }
-
-        // 4. 获取入口节点信息
-        Node inNode = nodeService.getById(tunnel.getInNodeId());
-
-        if (inNode == null) {
-            return;
-        }
-
-        // 5. 通知入口节点重新应用配置（限速由 agent 从 DB 读取 speedId 自动应用）
-        sendApplyConfig(inNode.getId());
+        // Realm no longer supports dynamic limiters through config sync.
+        // Left empty as a no-op to remove GostUtil compatibility content.
     }
 }

@@ -60,6 +60,9 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
     @Resource
     NodeService nodeService;
 
+    @Resource
+    private com.admin.common.task.RealmConfigSyncAsync realmConfigSyncAsync;
+
 
     @Override
     public R createForward(ForwardDto forwardDto) {
@@ -949,15 +952,6 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
             log.warn("节点 {} ApplyConfig 异常: {}", nodeId, e.getMessage());
         }
     }
-
-    /**
-     * 更新转发状态为错误
-     */
-    private void updateForwardStatusToError(Forward forward) {
-        forward.setStatus(FORWARD_STATUS_ERROR);
-        this.updateById(forward);
-    }
-
 
     /**
      * 更新转发状态为错误

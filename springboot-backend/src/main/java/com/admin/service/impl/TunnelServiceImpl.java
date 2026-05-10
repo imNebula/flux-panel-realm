@@ -717,7 +717,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
             tcpPingData.put("timeout", 5000); // 5秒超时
 
             // 发送TCP ping命令到节点
-            GostDto gostResult = WebSocketServer.send_msg(node.getId(), tcpPingData, "TcpPing");
+            WsResult gostResult = WebSocketServer.send_msg(node.getId(), tcpPingData, "TcpPing");
             
             DiagnosisResult result = new DiagnosisResult();
             result.setNodeId(node.getId());

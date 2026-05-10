@@ -6,10 +6,9 @@ import cn.hutool.core.map.MapUtil;
 import cn.hutool.core.util.StrUtil;
 import com.admin.common.dto.*;
 import com.admin.common.lang.R;
-
+import com.admin.common.task.RealmConfigSyncAsync;
 import com.admin.common.utils.JwtUtil;
 import com.admin.common.utils.Md5Util;
-import com.admin.common.utils.WebSocketServer;
 import com.admin.entity.*;
 import com.admin.mapper.ForwardMapper;
 import com.admin.mapper.UserMapper;
@@ -25,13 +24,15 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
 
 /**
  * <p>
  * 用户服务实现类
  * 提供用户的增删改查功能，包括用户登录、创建、更新、删除和套餐信息查询
- * 支持用户关联数据的级联删除，包括转发记录清理和节点配置重载
+ * 支持用户关联数据的级联删除，包括转发和Gost服务的清理
  * </p>
  *
  * @author QAQ
@@ -116,6 +117,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
     @Resource
     private ImageCaptchaApplication application;
+
+    @Resource
+    private RealmConfigSyncAsync realmConfigSyncAsync;
 
     // ========== 公共接口实现 ==========
 
@@ -523,64 +527,51 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
      * @param userId 用户ID
      */
     private void deleteUserRelatedData(Long userId) {
-        // 1. 删除用户的所有转发并通知节点重载配置
-        deleteUserForwards(userId);
-
+        // 1. 删除用户的所有转发和对应的Gost服务
+        deleteUserForwardsAndGostServices(userId);
+        
         // 2. 删除用户隧道权限
         deleteUserTunnelPermissions(userId);
     }
 
     /**
-     * 删除用户所有转发记录，并为各节点发送 ApplyConfig
+     * 删除用户转发和对应的Gost服务
+     * 
+     * @param userId 用户ID
      */
-    private void deleteUserForwards(Long userId) {
-        List<Forward> userForwards = forwardMapper.selectList(
-                new QueryWrapper<Forward>().eq("user_id", userId));
-
-        // 收集涉及的节点 ID
-        Set<Long> nodeIds = new HashSet<>();
+    private void deleteUserForwardsAndGostServices(Long userId) {
+        QueryWrapper<Forward> forwardQuery = new QueryWrapper<>();
+        forwardQuery.eq("user_id", userId);
+        List<Forward> userForwards = forwardMapper.selectList(forwardQuery);
+        
         for (Forward forward : userForwards) {
-            Tunnel tunnel = tunnelService.getById(forward.getTunnelId());
-            if (tunnel != null) {
-                if (tunnel.getInNodeId() != null) nodeIds.add(tunnel.getInNodeId());
-                if (tunnel.getOutNodeId() != null) nodeIds.add(tunnel.getOutNodeId());
-            }
+            // 删除数据库中的转发记录
             forwardMapper.deleteById(forward.getId());
-        }
-
-        // 通知所有涉及节点重新加载配置
-        for (Long nodeId : nodeIds) {
+            
             try {
-                com.alibaba.fastjson.JSONObject cmd = new com.alibaba.fastjson.JSONObject();
-                cmd.put("action", "reload");
-                WebSocketServer.send_msg(nodeId, cmd, "ApplyConfig");
-            } catch (Exception ignored) {}
+                // 删除Gost服务
+                deleteGostServicesForForward(forward, userId);
+            } catch (Exception e) {
+                // 记录错误但继续删除，避免因为Gost服务删除失败而阻断用户删除
+                System.err.println("删除用户转发对应的服务失败，转发ID: " + forward.getId() + ", 错误: " + e.getMessage());
+            }
         }
     }
 
     /**
-     * 获取用户隧道关系
+     * 删除转发对应的Gost服务
      * 
+     * @param forward 转发对象
      * @param userId 用户ID
-     * @param tunnelId 隧道ID
-     * @return 用户隧道关系对象
      */
-    private UserTunnel getUserTunnelRelation(Long userId, Long tunnelId) {
-        return userTunnelService.getOne(new QueryWrapper<UserTunnel>()
-                .eq("user_id", userId)
-                .eq("tunnel_id", tunnelId));
-    }
+    private void deleteGostServicesForForward(Forward forward, Long userId) {
+        Tunnel tunnel = tunnelService.getById(forward.getTunnelId());
+        if (tunnel == null) return;
 
-    /**
-     * 构建服务名称
-     * 
-     * @param forwardId 转发ID
-     * @param userId 用户ID
-     * @param userTunnelId 用户隧道ID
-     * @return 服务名称
-     */
-    private String buildServiceName(Long forwardId, Long userId, Integer userTunnelId) {
-        return forwardId + "_" + userId + "_" + userTunnelId;
+        realmConfigSyncAsync.syncNodeConfig(tunnel.getInNodeId());
+        if (tunnel.getType() == TUNNEL_TYPE_TUNNEL_FORWARD && tunnel.getOutNodeId() != null) {
+            realmConfigSyncAsync.syncNodeConfig(tunnel.getOutNodeId());
+        }
     }
 
 

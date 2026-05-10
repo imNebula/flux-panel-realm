@@ -2,7 +2,7 @@ package com.admin.service.impl;
 
 import cn.hutool.core.util.IdUtil;
 import cn.hutool.core.util.StrUtil;
-import com.admin.common.dto.GostDto;
+import com.admin.common.dto.WsResult;
 import com.admin.common.dto.NodeDto;
 import com.admin.common.dto.NodeUpdateDto;
 import com.admin.common.lang.R;
@@ -140,7 +140,7 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
             req.put("tls", newTls);
             req.put("socks", newSocks);
 
-            GostDto gostResult = WebSocketServer.send_msg(node.getId(), req, "SetProtocol");
+            WsResult gostResult = WebSocketServer.send_msg(node.getId(), req, "SetProtocol");
             if (!Objects.equals(gostResult.getMsg(), "OK")){
                 return R.err(gostResult.getMsg());
             }

@@ -1,5 +1,6 @@
 package com.admin.service.impl;
 
+import com.admin.common.dto.WsResult;
 import com.admin.common.dto.SpeedLimitDto;
 import com.admin.common.dto.SpeedLimitUpdateDto;
 import com.admin.common.lang.R;
@@ -42,7 +43,13 @@ public class SpeedLimitServiceImpl extends ServiceImpl<SpeedLimitMapper, SpeedLi
 
     // ========== 常量定义 ==========
     
-    // 限速规则状态
+    /** Gost操作成功响应消息 */
+    private static final String GOST_SUCCESS_MSG = "OK";
+    
+    /** Gost未找到资源响应消息 */
+    private static final String GOST_NOT_FOUND_MSG = "not found";
+    
+    /** 限速规则状态 */
     private static final int SPEED_LIMIT_ACTIVE_STATUS = 1;
     private static final int SPEED_LIMIT_INACTIVE_STATUS = 0;
     
@@ -101,7 +108,14 @@ public class SpeedLimitServiceImpl extends ServiceImpl<SpeedLimitMapper, SpeedLi
             return R.err(ERROR_CREATE_MSG);
         }
 
-        // 3. 限速规则已存入 DB，agent 在下次 ApplyConfig 时自动应用
+        // 3. 调用Gost API添加限速器
+        R gostResult = addGostLimiter(speedLimit, tunnelValidation.getTunnel());
+        if (gostResult.getCode() != 0) {
+            handleGostOperationFailure(speedLimit);
+            this.removeById(speedLimit.getId());
+            return gostResult;
+        }
+        
         return R.ok();
     }
 
@@ -139,7 +153,11 @@ public class SpeedLimitServiceImpl extends ServiceImpl<SpeedLimitMapper, SpeedLi
         // 3. 更新限速规则数据
         updateSpeedLimitEntity(speedLimitUpdateDto, speedLimit);
 
-        // 4. 限速配置已存 DB，agent 会在下次 ApplyConfig 时自动更新
+        // 4. 调用Gost API更新限速器
+        R gostResult = updateGostLimiter(speedLimit, tunnelValidation.getTunnel());
+        if (gostResult.getCode() != 0) {
+            return gostResult;
+        }
 
         // 5. 保存更新
         boolean result = this.updateById(speedLimit);
@@ -174,7 +192,10 @@ public class SpeedLimitServiceImpl extends ServiceImpl<SpeedLimitMapper, SpeedLi
             return R.ok();
         }
 
-        // 4. 删除限速规则数据库记录
+        // 4. 调用Gost API删除限速器
+        deleteGostLimiter(id, tunnel);
+
+        // 5. 删除限速规则
         boolean result = this.removeById(id);
         return result ? R.ok(SUCCESS_DELETE_MSG) : R.err(ERROR_DELETE_MSG);
     }
@@ -265,7 +286,6 @@ public class SpeedLimitServiceImpl extends ServiceImpl<SpeedLimitMapper, SpeedLi
      * @return 操作结果响应
      */
     private R addGostLimiter(SpeedLimit speedLimit, Tunnel tunnel) {
-        // Gost限速器方法已删除，限速由 realm-agent 从 DB 读取 speedId 应用
         return R.ok();
     }
 
@@ -277,7 +297,7 @@ public class SpeedLimitServiceImpl extends ServiceImpl<SpeedLimitMapper, SpeedLi
      * @return 操作结果响应
      */
     private R updateGostLimiter(SpeedLimit speedLimit, Tunnel tunnel) {
-        return R.ok(); // 限速由 realm-agent 从 DB 读取 speedId 应用
+        return R.ok();
     }
 
     /**
@@ -288,7 +308,7 @@ public class SpeedLimitServiceImpl extends ServiceImpl<SpeedLimitMapper, SpeedLi
      * @return 操作结果响应
      */
     private R deleteGostLimiter(Long speedLimitId, Tunnel tunnel) {
-        return R.ok(); // 限速由 realm-agent 从 DB 读取 speedId 应用
+        return R.ok();
     }
 
     /**
@@ -313,6 +333,15 @@ public class SpeedLimitServiceImpl extends ServiceImpl<SpeedLimitMapper, SpeedLi
         return bd.doubleValue() + "";
     }
 
+    /**
+     * 检查Gost操作是否成功
+     * 
+     * @param gostResult Gost操作结果
+     * @return 是否成功
+     */
+    private boolean isGostOperationSuccess(WsResult gostResult) {
+        return Objects.equals(gostResult.getMsg(), GOST_SUCCESS_MSG);
+    }
 
     // ========== 内部数据类 ==========
 
