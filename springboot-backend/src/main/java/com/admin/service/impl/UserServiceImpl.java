@@ -6,9 +6,10 @@ import cn.hutool.core.map.MapUtil;
 import cn.hutool.core.util.StrUtil;
 import com.admin.common.dto.*;
 import com.admin.common.lang.R;
-import com.admin.common.utils.GostUtil;
+
 import com.admin.common.utils.JwtUtil;
 import com.admin.common.utils.Md5Util;
+import com.admin.common.utils.WebSocketServer;
 import com.admin.entity.*;
 import com.admin.mapper.ForwardMapper;
 import com.admin.mapper.UserMapper;
@@ -24,15 +25,13 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Objects;
+import java.util.*;
 
 /**
  * <p>
  * 用户服务实现类
  * 提供用户的增删改查功能，包括用户登录、创建、更新、删除和套餐信息查询
- * 支持用户关联数据的级联删除，包括转发和Gost服务的清理
+ * 支持用户关联数据的级联删除，包括转发记录清理和节点配置重载
  * </p>
  *
  * @author QAQ
@@ -524,77 +523,38 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
      * @param userId 用户ID
      */
     private void deleteUserRelatedData(Long userId) {
-        // 1. 删除用户的所有转发和对应的Gost服务
-        deleteUserForwardsAndGostServices(userId);
-        
+        // 1. 删除用户的所有转发并通知节点重载配置
+        deleteUserForwards(userId);
+
         // 2. 删除用户隧道权限
         deleteUserTunnelPermissions(userId);
     }
 
     /**
-     * 删除用户转发和对应的Gost服务
-     * 
-     * @param userId 用户ID
+     * 删除用户所有转发记录，并为各节点发送 ApplyConfig
      */
-    private void deleteUserForwardsAndGostServices(Long userId) {
-        QueryWrapper<Forward> forwardQuery = new QueryWrapper<>();
-        forwardQuery.eq("user_id", userId);
-        List<Forward> userForwards = forwardMapper.selectList(forwardQuery);
-        
+    private void deleteUserForwards(Long userId) {
+        List<Forward> userForwards = forwardMapper.selectList(
+                new QueryWrapper<Forward>().eq("user_id", userId));
+
+        // 收集涉及的节点 ID
+        Set<Long> nodeIds = new HashSet<>();
         for (Forward forward : userForwards) {
-            try {
-                // 删除Gost服务
-                deleteGostServicesForForward(forward, userId);
-            } catch (Exception e) {
-                // 记录错误但继续删除，避免因为Gost服务删除失败而阻断用户删除
-                System.err.println("删除用户转发对应的Gost服务失败，转发ID: " + forward.getId() + ", 错误: " + e.getMessage());
+            Tunnel tunnel = tunnelService.getById(forward.getTunnelId());
+            if (tunnel != null) {
+                if (tunnel.getInNodeId() != null) nodeIds.add(tunnel.getInNodeId());
+                if (tunnel.getOutNodeId() != null) nodeIds.add(tunnel.getOutNodeId());
             }
-            
-            // 删除数据库中的转发记录
             forwardMapper.deleteById(forward.getId());
         }
-    }
 
-    /**
-     * 删除转发对应的Gost服务
-     * 
-     * @param forward 转发对象
-     * @param userId 用户ID
-     */
-    private void deleteGostServicesForForward(Forward forward, Long userId) {
-        Tunnel tunnel = tunnelService.getById(forward.getTunnelId());
-        if (tunnel == null) return;
-
-        Node inNode = nodeService.getNodeById(tunnel.getInNodeId());
-        if (inNode == null) return;
-
-        // 获取用户隧道关系
-        UserTunnel userTunnel = getUserTunnelRelation(userId, tunnel.getId());
-        if (userTunnel == null) return;
-
-        String serviceName = buildServiceName(forward.getId(), userId, userTunnel.getId());
-
-        // 删除主服务
-        GostUtil.DeleteService(inNode.getId(), serviceName);
-
-        // 如果是隧道转发，还需要删除链和远程服务
-        if (tunnel.getType() == TUNNEL_TYPE_TUNNEL_FORWARD) {
-            deleteGostTunnelForwardServices(tunnel, serviceName, inNode);
-        }
-    }
-
-    /**
-     * 删除隧道转发相关的Gost服务
-     * 
-     * @param tunnel 隧道对象
-     * @param serviceName 服务名称
-     * @param inNode 入口节点
-     */
-    private void deleteGostTunnelForwardServices(Tunnel tunnel, String serviceName, Node inNode) {
-        Node outNode = nodeService.getNodeById(tunnel.getOutNodeId());
-        if (outNode != null) {
-            GostUtil.DeleteChains(inNode.getId(), serviceName);
-            GostUtil.DeleteRemoteService(outNode.getId(), serviceName);
+        // 通知所有涉及节点重新加载配置
+        for (Long nodeId : nodeIds) {
+            try {
+                com.alibaba.fastjson.JSONObject cmd = new com.alibaba.fastjson.JSONObject();
+                cmd.put("action", "reload");
+                WebSocketServer.send_msg(nodeId, cmd, "ApplyConfig");
+            } catch (Exception ignored) {}
         }
     }
 

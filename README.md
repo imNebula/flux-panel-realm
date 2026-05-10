@@ -1,48 +1,43 @@
-# flux-panel转发面板 哆啦A梦转发面板
+# flux-panel-realm 转发面板
 
-## 项目更新说明
-由于一些个人原因，**flux-panel** 将暂停更新一段时间，**恢复更新时间暂不确定**。
+本仓库是 [bqlpfy/flux-panel](https://github.com/bqlpfy/flux-panel) 的衍生版本。感谢原作者的开源贡献。  
+原项目基于 Gost 实现，本项目已将其核心组件完全迁移为基于 [zhboner/realm](https://github.com/zhboner/realm) v2 的转发面板。节点运行时由 Gost 替换为高性能的 `flux-realm-agent`，并将旧版 Gost 的配置及 API 通过兼容层映射为 Realm endpoints。
 
-在此期间，项目不会继续推进新功能或修复问题，对可能带来的不便表示抱歉。当前已有功能仍可正常使用，也欢迎大家继续 Fork 或自行维护。
-
-如后续恢复更新，我会第一时间在仓库中说明。  
-感谢大家的理解与支持。
-
-
-本分支已迁移为基于 [zhboner/realm](https://github.com/zhboner/realm) v2 的转发面板，节点运行时为 `flux-realm-agent`，旧 Gost 配置通过兼容层映射为 Realm endpoints。
 ---
+
 ## 特性
 
-- 支持按 **隧道账号级别** 管理流量转发数量，可用于用户/隧道配额控制
-- 支持 **TCP** 和 **UDP** 协议的转发
-- 支持两种转发模式：**端口转发** 与 **隧道转发**
-- 可针对 **指定用户的指定隧道进行限速** 设置
-- 支持配置 **单向或双向流量计费方式**，灵活适配不同计费模型
-- 提供灵活的转发策略配置，适用于多种网络场景
+- **核心迁移**：底层全面替换为 Realm，提供更高效的端口转发性能。
+- **流量与延迟监控**：支持每端点（per-endpoint）的精准流量统计，并附带 Komari 风格的 p50/p95/p99 延迟探测与图表展示。
+- **资源限制**：支持按 **隧道账号级别** 管理流量转发数量，可用于用户/隧道配额控制。
+- **协议支持**：支持 **TCP** 和 **UDP** 协议的转发。
+- **多种模式**：支持两种转发模式：**端口转发** 与 **隧道转发**。
+- **限速功能**：可针对 **指定用户的指定隧道进行限速** 设置。
+- **流量计费**：支持配置 **单向或双向流量计费方式**，灵活适配不同计费模型。
 
+---
 
 ## 部署流程
----
+
 ### Docker Compose部署
+
 #### 快速部署
 面板端(稳定版)：
 ```bash
-curl -L https://raw.githubusercontent.com/bqlpfy/flux-panel/refs/heads/main/panel_install.sh -o panel_install.sh && chmod +x panel_install.sh && ./panel_install.sh
+curl -L https://raw.githubusercontent.com/imNebula/flux-panel-realm/refs/heads/main/panel_install.sh -o panel_install.sh && chmod +x panel_install.sh && ./panel_install.sh
 ```
 节点端(稳定版)：
 ```bash
 curl -L https://raw.githubusercontent.com/imNebula/flux-panel-realm/refs/heads/main/install.sh -o install.sh && chmod +x install.sh && ./install.sh install --server-addr 面板地址:端口 --secret 节点密钥
-
 ```
 
 面板端(开发版)：
 ```bash
-curl -L https://raw.githubusercontent.com/bqlpfy/flux-panel/refs/heads/beta/panel_install.sh -o panel_install.sh && chmod +x panel_install.sh && ./panel_install.sh
+curl -L https://raw.githubusercontent.com/imNebula/flux-panel-realm/refs/heads/beta/panel_install.sh -o panel_install.sh && chmod +x panel_install.sh && ./panel_install.sh
 ```
 节点端(开发版)：
 ```bash
-curl -L https://raw.githubusercontent.com/bqlpfy/flux-panel/refs/heads/beta/install.sh -o install.sh && chmod +x install.sh && ./install.sh
-
+curl -L https://raw.githubusercontent.com/imNebula/flux-panel-realm/refs/heads/beta/install.sh -o install.sh && chmod +x install.sh && ./install.sh install --server-addr 面板地址:端口 --secret 节点密钥
 ```
 
 #### 默认管理员账号
@@ -52,6 +47,7 @@ curl -L https://raw.githubusercontent.com/bqlpfy/flux-panel/refs/heads/beta/inst
 
 > ⚠️ 首次登录后请立即修改默认密码！
 
+---
 
 ## 免责声明
 
@@ -74,16 +70,4 @@ curl -L https://raw.githubusercontent.com/bqlpfy/flux-panel/refs/heads/beta/inst
 
 作者对因使用本项目所造成的任何直接或间接损失概不负责，亦不提供任何形式的担保、承诺或技术支持。  
 
-
-请务必在合法、合规、安全的前提下使用本项目。  
-
----
-## ⭐ 喝杯咖啡！（USDT）
-
-| 网络       | 地址                                                                 |
-|------------|----------------------------------------------------------------------|
-| BNB(BEP20) | `0x755492c03728851bbf855daa28a1e089f9aca4d1`                          |
-| TRC20      | `TYh2L3xxXpuJhAcBWnt3yiiADiCSJLgUm7`                                  |
-| Aptos      | `0xf2f9fb14749457748506a8281628d556e8540d1eb586d202cd8b02b99d369ef8`  |
-
-[![Star History Chart](https://api.star-history.com/svg?repos=bqlpfy/flux-panel&type=Date)](https://www.star-history.com/#bqlpfy/flux-panel&Date)
+请务必在合法、合规、安全的前提下使用本项目。

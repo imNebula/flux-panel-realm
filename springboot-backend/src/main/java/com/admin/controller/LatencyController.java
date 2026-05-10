@@ -2,7 +2,7 @@ package com.admin.controller;
 
 import com.admin.common.annotation.RequireRole;
 import com.admin.common.aop.LogAnnotation;
-import com.admin.common.dto.GostDto;
+import com.admin.common.dto.WsResult;
 import com.admin.common.lang.R;
 import com.admin.common.utils.WebSocketServer;
 import com.admin.entity.LatencySample;
@@ -70,7 +70,7 @@ public class LatencyController extends BaseController {
         tcpPingData.put("count", params.getOrDefault("count", 2));
         tcpPingData.put("timeout", params.getOrDefault("timeout", 3000));
 
-        GostDto result = WebSocketServer.send_msg(nodeId, tcpPingData, "TcpPing");
+        WsResult result = WebSocketServer.send_msg(nodeId, tcpPingData, "TcpPing");
         if (!"OK".equals(result.getMsg())) {
             return R.err(result.getMsg());
         }

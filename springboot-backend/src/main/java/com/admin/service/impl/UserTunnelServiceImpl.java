@@ -5,6 +5,7 @@ import com.admin.common.dto.UserTunnelQueryDto;
 import com.admin.common.dto.UserTunnelUpdateDto;
 import com.admin.common.dto.UserTunnelWithDetailDto;
 import com.admin.common.lang.R;
+import com.admin.common.utils.WebSocketServer;
 import com.admin.entity.UserTunnel;
 import com.admin.mapper.TunnelMapper;
 import com.admin.mapper.UserTunnelMapper;
@@ -12,7 +13,7 @@ import com.admin.service.TunnelService;
 import com.admin.service.UserTunnelService;
 import com.admin.service.ForwardService;
 import com.admin.service.NodeService;
-import com.admin.common.utils.GostUtil;
+
 import com.admin.entity.Forward;
 import com.admin.entity.Tunnel;
 import com.admin.entity.Node;
@@ -269,7 +270,7 @@ public class UserTunnelServiceImpl extends ServiceImpl<UserTunnelMapper, UserTun
 
             for (Forward forward : userTunnelForwards) {
                 try {
-                    // 先调用GostUtil删除/停止服务
+                    // 通知节点重载配置（删除 DB 记录后 realm-agent 自动移除该转发）
                     stopForwardService(forward, userId, userTunnel != null ? userTunnel.getId() : 0);
 
                     // 然后删除数据库记录
@@ -293,46 +294,27 @@ public class UserTunnelServiceImpl extends ServiceImpl<UserTunnelMapper, UserTun
     private void stopForwardService(Forward forward, Integer userId, Integer userTunnelId) {
         try {
             Tunnel tunnel = tunnelService.getById(forward.getTunnelId());
-            if (tunnel == null) {
-                return;
-            }
+            if (tunnel == null) return;
 
-            Node inNode = nodeService.getById(tunnel.getInNodeId());
-            Node outNode = nodeService.getById(tunnel.getOutNodeId());
-            
-            String serviceName = buildServiceName(forward.getId(), Long.valueOf(userId), userTunnelId);
-            
-            // 1. 先删除主服务
-            if (inNode != null) {
-                try {
-                    GostUtil.DeleteService(inNode.getId(), serviceName);
-                } catch (Exception e) {
-                    // 主服务删除失败，记录但继续
-                }
+            // 通知入口节点重载配置（删除 DB 记录后 agent 下次心跳自动移除该转发）
+            Long inNodeId = tunnel.getInNodeId();
+            Long outNodeId = tunnel.getOutNodeId();
+            sendApplyConfig(inNodeId);
+            if (outNodeId != null && !outNodeId.equals(inNodeId)) {
+                sendApplyConfig(outNodeId);
             }
-            
-            // 2. 如果是隧道转发，删除远端服务
-            if (tunnel.getType() == 1 && outNode != null && !outNode.getId().equals(inNode != null ? inNode.getId() : null)) {
-                try {
-                    GostUtil.DeleteRemoteService(outNode.getId(), serviceName);
-                } catch (Exception e) {
-                    // 远端服务删除失败，记录但继续
-                }
-            }
-            
-            // 3. 如果是隧道转发，最后删除转发链
-            if (tunnel.getType() == 1 && inNode != null) {
-                try {
-                    GostUtil.DeleteChains(inNode.getId(), serviceName);
-                } catch (Exception e) {
-                    // 转发链删除失败，记录但继续
-                }
-            }
-            
         } catch (Exception e) {
-            // 服务删除失败，记录错误
-            throw new RuntimeException("删除转发服务失败，转发ID：" + forward.getId() + "，错误：" + e.getMessage(), e);
+            throw new RuntimeException("通知节点失败，转发ID：" + forward.getId() + "，错误：" + e.getMessage(), e);
         }
+    }
+
+    private void sendApplyConfig(Long nodeId) {
+        if (nodeId == null) return;
+        try {
+            com.alibaba.fastjson.JSONObject cmd = new com.alibaba.fastjson.JSONObject();
+            cmd.put("action", "reload");
+            WebSocketServer.send_msg(nodeId, cmd, "ApplyConfig");
+        } catch (Exception ignored) {}
     }
     
     /**
@@ -430,18 +412,7 @@ public class UserTunnelServiceImpl extends ServiceImpl<UserTunnelMapper, UserTun
             return;
         }
 
-        // 5. 批量更新该用户在该隧道下所有转发的限速配置（只更新入口节点）
-        for (Forward forward : userTunnelForwards) {
-            String serviceName = buildServiceName(forward.getId(), Long.valueOf(userId), userTunnel.getId());
-
-            String interfaceName = null;
-            // 创建主服务
-            if (tunnel.getType() != 2) { // 不是隧道转发服务才会存在网络接口
-                interfaceName = forward.getInterfaceName();
-            }
-
-            // 6. 更新入口节点的主服务限速配置（使用批量UpdateService接口）
-            GostUtil.UpdateService(inNode.getId(), serviceName, forward.getInPort(), speedId, forward.getRemoteAddr(), tunnel.getType(), tunnel, forward.getStrategy(), interfaceName);
-        }
+        // 5. 通知入口节点重新应用配置（限速由 agent 从 DB 读取 speedId 自动应用）
+        sendApplyConfig(inNode.getId());
     }
 }

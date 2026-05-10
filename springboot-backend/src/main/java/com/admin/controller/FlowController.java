@@ -2,11 +2,9 @@ package com.admin.controller;
 
 import com.admin.common.aop.LogAnnotation;
 import com.admin.common.dto.FlowDto;
-import com.admin.common.dto.GostConfigDto;
 import com.admin.common.lang.R;
-import com.admin.common.task.CheckGostConfigAsync;
 import com.admin.common.utils.AESCrypto;
-import com.admin.common.utils.GostUtil;
+import com.admin.common.utils.WebSocketServer;
 import com.admin.entity.*;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
@@ -62,8 +60,7 @@ public class FlowController extends BaseController {
     // 缓存加密器实例，避免重复创建
     private static final ConcurrentHashMap<String, AESCrypto> CRYPTO_CACHE = new ConcurrentHashMap<>();
 
-    @Resource
-    CheckGostConfigAsync checkGostConfigAsync;
+    // (no Gost-specific beans needed)
 
     /**
      * 加密消息包装器
@@ -102,23 +99,7 @@ public class FlowController extends BaseController {
     @PostMapping("/config")
     @LogAnnotation
     public String config(@RequestBody String rawData, String secret) {
-        Node node = nodeService.getOne(new QueryWrapper<Node>().eq("secret", secret));
-        if (node == null) return SUCCESS_RESPONSE;
-
-        try {
-            // 尝试解密数据
-            String decryptedData = decryptIfNeeded(rawData, secret);
-
-            // 解析为GostConfigDto
-            GostConfigDto gostConfigDto = JSON.parseObject(decryptedData, GostConfigDto.class);
-            checkGostConfigAsync.cleanNodeConfigs(node.getId().toString(), gostConfigDto);
-
-            log.info("🔓 节点 {} 配置数据接收成功{}", node.getId(), isEncryptedMessage(rawData) ? "（已解密）" : "");
-
-        } catch (Exception e) {
-            log.error("处理节点 {} 配置数据失败: {}", node.getId(), e.getMessage());
-        }
-
+        // 不再需要处理 Gost 配置，节点心跳配置由 WebSocketServer 线路处理
         return SUCCESS_RESPONSE;
     }
 
@@ -302,11 +283,16 @@ public class FlowController extends BaseController {
     public void pauseService(List<Forward> forwardList, String name) {
         for (Forward forward : forwardList) {
             Tunnel tunnel = tunnelService.getById(forward.getTunnelId());
-            if (tunnel != null){
-                GostUtil.PauseService(tunnel.getInNodeId(), name);
-                if (tunnel.getType() == 2){
-                    GostUtil.PauseRemoteService(tunnel.getOutNodeId(), name);
-                }
+            if (tunnel != null) {
+                // 发送 PauseForward 命令让 realm-agent 暫停该转发
+                JSONObject cmd = new JSONObject();
+                cmd.put("forward_id", forward.getId());
+                try {
+                    WebSocketServer.send_msg(tunnel.getInNodeId(), cmd, "PauseForward");
+                    if (tunnel.getType() == 2) {
+                        WebSocketServer.send_msg(tunnel.getOutNodeId(), cmd, "PauseForward");
+                    }
+                } catch (Exception ignored) {}
             }
             forward.setStatus(0);
             forwardService.updateById(forward);

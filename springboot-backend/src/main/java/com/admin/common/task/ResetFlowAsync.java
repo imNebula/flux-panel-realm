@@ -1,6 +1,7 @@
 package com.admin.common.task;
 
-import com.admin.common.utils.GostUtil;
+
+import com.admin.common.utils.WebSocketServer;
 import com.admin.entity.Forward;
 import com.admin.entity.Tunnel;
 import com.admin.entity.User;
@@ -9,6 +10,7 @@ import com.admin.service.ForwardService;
 import com.admin.service.TunnelService;
 import com.admin.service.UserService;
 import com.admin.service.UserTunnelService;
+import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import lombok.extern.slf4j.Slf4j;
@@ -231,10 +233,14 @@ public class ResetFlowAsync {
         Tunnel tunnel = tunnelService.getById(forward.getTunnelId());
         if (tunnel == null) return;
 
-        GostUtil.PauseService(tunnel.getInNodeId(), buildServiceName(forward.getId(), forward.getUserId(), userTunnelId));
-        if (tunnel.getType() == 2){
-            GostUtil.PauseRemoteService(tunnel.getOutNodeId(), buildServiceName(forward.getId(), forward.getUserId(), userTunnelId));
-        }
+        JSONObject cmd = new JSONObject();
+        cmd.put("forward_id", forward.getId());
+        try {
+            WebSocketServer.send_msg(tunnel.getInNodeId(), cmd, "PauseForward");
+            if (tunnel.getType() == 2) {
+                WebSocketServer.send_msg(tunnel.getOutNodeId(), cmd, "PauseForward");
+            }
+        } catch (Exception ignored) {}
     }
 
 

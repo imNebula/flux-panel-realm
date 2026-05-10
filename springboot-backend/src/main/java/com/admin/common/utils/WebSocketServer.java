@@ -1,7 +1,7 @@
 package com.admin.common.utils;
 
 
-import com.admin.common.dto.GostDto;
+import com.admin.common.dto.WsResult;
 import com.admin.entity.LatencySample;
 import com.admin.entity.Node;
 import com.admin.entity.TrafficSample;
@@ -50,7 +50,7 @@ public class WebSocketServer extends TextWebSocketHandler {
     private static final ConcurrentHashMap<String, Object> sessionLocks = new ConcurrentHashMap<>();
     
     // 存储等待响应的请求，key为requestId，value为CompletableFuture
-    private static final ConcurrentHashMap<String, CompletableFuture<GostDto>> pendingRequests = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, CompletableFuture<WsResult>> pendingRequests = new ConcurrentHashMap<>();
     
     // 缓存加密器实例，避免重复创建
     private static final ConcurrentHashMap<String, AESCrypto> cryptoCache = new ConcurrentHashMap<>();
@@ -104,10 +104,10 @@ public class WebSocketServer extends TextWebSocketHandler {
                         JSONObject responseData = responseJson.getJSONObject("data");
                         
                         if (requestId != null) {
-                            CompletableFuture<GostDto> future = pendingRequests.remove(requestId);
+                            CompletableFuture<WsResult> future = pendingRequests.remove(requestId);
 
                             if (future != null) {
-                                GostDto result = new GostDto();
+                                WsResult result = new WsResult();
                                 
                                 // 根据响应类型处理不同的数据
                                 if ("PingResponse".equals(responseType) && responseData != null) {
@@ -581,12 +581,12 @@ public class WebSocketServer extends TextWebSocketHandler {
 
 
 
-    public static GostDto send_msg(Long node_id, Object msg, String type) {
+    public static WsResult send_msg(Long node_id, Object msg, String type) {
         WebSocketSession nodeSession = nodeSessions.get(node_id);
 
         if (nodeSession == null) {
             log.info("发送消息失败：节点 {} 不在线或会话不存在", node_id);
-            GostDto result = new GostDto();
+            WsResult result = new WsResult();
             result.setMsg("节点不在线");
             return result;
         }
@@ -595,7 +595,7 @@ public class WebSocketServer extends TextWebSocketHandler {
             log.info("发送消息失败：节点 {} 连接已断开，清理会话", node_id);
             nodeSessions.remove(node_id);
             sessionLocks.remove(nodeSession.getId());
-            GostDto result = new GostDto();
+            WsResult result = new WsResult();
             result.setMsg("节点连接已断开");
             return result;
         }
@@ -604,7 +604,7 @@ public class WebSocketServer extends TextWebSocketHandler {
         String requestId = UUID.randomUUID().toString();
         
         // 创建CompletableFuture用于等待响应
-        CompletableFuture<GostDto> future = new CompletableFuture<>();
+        CompletableFuture<WsResult> future = new CompletableFuture<>();
         pendingRequests.put(requestId, future);
         
         // 获取节点密钥用于加密
@@ -616,7 +616,7 @@ public class WebSocketServer extends TextWebSocketHandler {
             data.put("data", msg);
             data.put("requestId", requestId);
             sendToUser(nodeSession, data.toJSONString(), nodeSecret);
-            GostDto result = future.get(10, TimeUnit.SECONDS);
+            WsResult result = future.get(10, TimeUnit.SECONDS);
             
             log.info("成功发送消息到节点 {} 并收到响应: {}", node_id, result.getMsg());
             return result;
@@ -625,7 +625,7 @@ public class WebSocketServer extends TextWebSocketHandler {
             // 清理请求和映射关系
             pendingRequests.remove(requestId);
 
-            GostDto result = new GostDto();
+            WsResult result = new WsResult();
             if (e instanceof java.util.concurrent.TimeoutException) {
                 result.setMsg("等待响应超时");
                 log.info("节点 {} 响应超时，可能存在连接问题", node_id);
