@@ -42,4 +42,26 @@ public class Forward extends BaseEntity{
 
     private Integer inx;
 
+    private String listenTransport;
+
+    private String remoteTransport;
+
+    private String proxyProtocol;
+
+    private String balanceStrategy;
+
+    private String extraRemotes;
+
+    private String throughAddr;
+
+    private String processMode;
+
+    private String processName;
+
+    private String statsMethod;
+
+    private Integer latencySampleEnabled;
+
+    private Integer latencySampleInterval;
+
 }

@@ -70,4 +70,22 @@ public class Tunnel extends BaseEntity {
     private String udpListenAddr;
 
     private String interfaceName;
+
+    private String listenTransport;
+
+    private String remoteTransport;
+
+    private String proxyProtocol;
+
+    private String processMode;
+
+    private String processName;
+
+    private String statsMethod;
+
+    private Integer latencySampleEnabled;
+
+    private Integer latencySampleInterval;
+
+    private String latencyProbeMode;
 }

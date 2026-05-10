@@ -10,14 +10,14 @@ export LC_ALL=C
 # 全局下载地址配置
 DOCKER_COMPOSEV4_URL="https://github.com/bqlpfy/flux-panel/releases/download/1.4.3/docker-compose-v4.yml"
 DOCKER_COMPOSEV6_URL="https://github.com/bqlpfy/flux-panel/releases/download/1.4.3/docker-compose-v6.yml"
-GOST_SQL_URL="https://github.com/bqlpfy/flux-panel/releases/download/1.4.3/gost.sql"
+REALM_SQL_URL="https://github.com/bqlpfy/flux-panel/releases/download/1.4.3/realm.sql"
 
 COUNTRY=$(curl -s https://ipinfo.io/country)
 if [ "$COUNTRY" = "CN" ]; then
     # 拼接 URL
     DOCKER_COMPOSEV4_URL="https://ghfast.top/${DOCKER_COMPOSEV4_URL}"
     DOCKER_COMPOSEV6_URL="https://ghfast.top/${DOCKER_COMPOSEV6_URL}"
-    GOST_SQL_URL="https://ghfast.top/${GOST_SQL_URL}"
+    REALM_SQL_URL="https://ghfast.top/${REALM_SQL_URL}"
 fi
 
 
@@ -198,12 +198,12 @@ install_panel() {
   echo "📡 选择配置文件：$(basename "$DOCKER_COMPOSE_URL")"
   curl -L -o docker-compose.yml "$DOCKER_COMPOSE_URL"
 
-  # 检查 gost.sql 是否已存在
-  if [[ -f "gost.sql" ]]; then
-    echo "⏭️ 跳过下载: gost.sql (使用当前位置的文件)"
+  # 检查 realm.sql 是否已存在
+  if [[ -f "realm.sql" ]]; then
+    echo "⏭️ 跳过下载: realm.sql (使用当前位置的文件)"
   else
     echo "📡 下载数据库初始化文件..."
-    curl -L -o gost.sql "$GOST_SQL_URL"
+    curl -L -o realm.sql "$REALM_SQL_URL"
   fi
   echo "✅ 文件准备完成"
 
@@ -298,8 +298,8 @@ update_panel() {
   # 检查数据库容器健康状态
   echo "🔍 检查数据库服务状态..."
   for i in {1..60}; do
-    if docker ps --format "{{.Names}}" | grep -q "^gost-mysql$"; then
-      DB_HEALTH=$(docker inspect -f '{{.State.Health.Status}}' gost-mysql 2>/dev/null || echo "unknown")
+    if docker ps --format "{{.Names}}" | grep -q "^flux-realm-mysql$"; then
+      DB_HEALTH=$(docker inspect -f '{{.State.Health.Status}}' flux-realm-mysql 2>/dev/null || echo "unknown")
       if [[ "$DB_HEALTH" == "healthy" ]]; then
         echo "✅ 数据库服务健康检查通过"
         break
@@ -315,7 +315,7 @@ update_panel() {
     fi
     if [ $i -eq 60 ]; then
       echo "❌ 数据库服务启动超时（60秒）"
-      echo "🔍 当前状态：$(docker inspect -f '{{.State.Health.Status}}' gost-mysql 2>/dev/null || echo '容器不存在')"
+      echo "🔍 当前状态：$(docker inspect -f '{{.State.Health.Status}}' flux-realm-mysql 2>/dev/null || echo '容器不存在')"
       echo "🛑 更新终止"
       return 1
     fi
@@ -907,8 +907,8 @@ WHERE \`created_time\` = 0 OR \`created_time\` IS NULL;
 EOF
 
   # 检查数据库容器
-  if ! docker ps --format "{{.Names}}" | grep -q "^gost-mysql$"; then
-    echo "❌ 数据库容器 gost-mysql 未运行"
+  if ! docker ps --format "{{.Names}}" | grep -q "^flux-realm-mysql$"; then
+    echo "❌ 数据库容器 flux-realm-mysql 未运行"
     echo "🔍 当前运行的容器："
     docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Status}}"
     echo "❌ 数据库结构更新失败，请手动执行 temp_migration.sql"
@@ -917,16 +917,16 @@ EOF
   fi
 
   # 执行数据库迁移
-  if docker exec -i gost-mysql mysql -u "$DB_USER" -p"$DB_PASSWORD" < temp_migration.sql 2>/dev/null; then
+  if docker exec -i flux-realm-mysql mysql -u "$DB_USER" -p"$DB_PASSWORD" < temp_migration.sql 2>/dev/null; then
     echo "✅ 数据库结构更新完成"
   else
     echo "⚠️ 使用用户密码失败，尝试root密码..."
-    if docker exec -i gost-mysql mysql -u root -p"$DB_PASSWORD" < temp_migration.sql 2>/dev/null; then
+    if docker exec -i flux-realm-mysql mysql -u root -p"$DB_PASSWORD" < temp_migration.sql 2>/dev/null; then
       echo "✅ 数据库结构更新完成"
     else
       echo "❌ 数据库结构更新失败，请手动执行 temp_migration.sql"
       echo "📁 迁移文件已保存为 temp_migration.sql"
-      echo "🔍 数据库容器状态: $(docker inspect -f '{{.State.Status}}' gost-mysql 2>/dev/null || echo '容器不存在')"
+      echo "🔍 数据库容器状态: $(docker inspect -f '{{.State.Status}}' flux-realm-mysql 2>/dev/null || echo '容器不存在')"
       echo "🛑 更新终止"
       return 1
     fi
@@ -1007,7 +1007,7 @@ export_migration_sql() {
   echo "   用户名: $DB_USER"
 
   # 检查数据库容器是否运行
-  if ! docker ps --format "{{.Names}}" | grep -q "^gost-mysql$"; then
+  if ! docker ps --format "{{.Names}}" | grep -q "^flux-realm-mysql$"; then
     echo "❌ 数据库容器未运行，无法导出数据"
     echo "🔍 当前运行的容器："
     docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Status}}"
@@ -1020,11 +1020,11 @@ export_migration_sql() {
 
   # 使用 mysqldump 导出数据库
   echo "⏳ 正在导出数据库..."
-  if docker exec gost-mysql mysqldump -u "$DB_USER" -p"$DB_PASSWORD" --single-transaction --routines --triggers "$DB_NAME" > "$SQL_FILE" 2>/dev/null; then
+  if docker exec flux-realm-mysql mysqldump -u "$DB_USER" -p"$DB_PASSWORD" --single-transaction --routines --triggers "$DB_NAME" > "$SQL_FILE" 2>/dev/null; then
     echo "✅ 数据库导出成功"
   else
     echo "⚠️ 使用用户密码失败，尝试root密码..."
-    if docker exec gost-mysql mysqldump -u root -p"$DB_PASSWORD" --single-transaction --routines --triggers "$DB_NAME" > "$SQL_FILE" 2>/dev/null; then
+    if docker exec flux-realm-mysql mysqldump -u root -p"$DB_PASSWORD" --single-transaction --routines --triggers "$DB_NAME" > "$SQL_FILE" 2>/dev/null; then
       echo "✅ 数据库导出成功"
     else
       echo "❌ 数据库导出失败"
@@ -1068,7 +1068,7 @@ uninstall_panel() {
   echo "🛑 停止并删除容器、镜像、卷..."
   $DOCKER_CMD down --rmi all --volumes --remove-orphans
   echo "🧹 删除配置文件..."
-  rm -f docker-compose.yml gost.sql .env
+  rm -f docker-compose.yml realm.sql .env
   echo "✅ 卸载完成"
 }
 

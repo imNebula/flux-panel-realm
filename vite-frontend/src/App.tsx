@@ -12,6 +12,7 @@ import ProfilePage from "@/pages/profile";
 import LimitPage from "@/pages/limit";
 import ConfigPage from "@/pages/config";
 import { SettingsPage } from "@/pages/settings";
+import LatencyPage from "@/pages/latency";
 
 import AdminLayout from "@/layouts/admin";
 import H5Layout from "@/layouts/h5";
@@ -224,6 +225,14 @@ function App() {
       <Route 
         path="/settings" 
         element={<SettingsPage />}
+      />
+      <Route 
+        path="/latency" 
+        element={
+          <ProtectedRoute useSimpleLayout={true}>
+            <LatencyPage />
+          </ProtectedRoute>
+        } 
       />
     </Routes>
   );

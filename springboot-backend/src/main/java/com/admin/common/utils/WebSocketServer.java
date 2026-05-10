@@ -1,12 +1,15 @@
 package com.admin.common.utils;
 
 
-import com.admin.common.dto.GostConfigDto;
 import com.admin.common.dto.GostDto;
-import com.admin.common.task.CheckGostConfigAsync;
+import com.admin.entity.LatencySample;
 import com.admin.entity.Node;
+import com.admin.entity.TrafficSample;
+import com.admin.service.LatencySampleService;
 import com.admin.service.NodeService;
+import com.admin.service.TrafficSampleService;
 import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -30,6 +33,12 @@ public class WebSocketServer extends TextWebSocketHandler {
 
     @Resource
     NodeService nodeService;
+
+    @Resource
+    TrafficSampleService trafficSampleService;
+
+    @Resource
+    LatencySampleService latencySampleService;
 
     // 存储所有活跃的 WebSocket 连接（
     private static final CopyOnWriteArraySet<WebSocketSession> activeSessions = new CopyOnWriteArraySet<>();
@@ -76,10 +85,15 @@ public class WebSocketServer extends TextWebSocketHandler {
                 // 尝试解密消息
                 String decryptedPayload = decryptMessageIfNeeded(message.getPayload(), nodeSecret);
 
-                if (decryptedPayload.contains("memory_usage")){
+                if (decryptedPayload.contains("memory_usage")) {
+                    persistRealmHeartbeat(id, decryptedPayload);
                     // 先发送确认消息
                     sendToUser(session, "{\"type\":\"call\"}", nodeSecret);
-                }else if (decryptedPayload.contains("requestId")) {
+                } else if (decryptedPayload.contains("TrafficSamples")) {
+                    persistTrafficSamples(id, decryptedPayload);
+                } else if (decryptedPayload.contains("LatencyProbeResponse") || decryptedPayload.contains("latency_ms")) {
+                    persistLatencySample(id, decryptedPayload);
+                } else if (decryptedPayload.contains("requestId")) {
                     log.info("收到消息: {}", decryptedPayload);
                     // 处理命令响应消息
                     try {
@@ -136,6 +150,138 @@ public class WebSocketServer extends TextWebSocketHandler {
             }
         } catch (Exception e) {
             log.info("处理WebSocket消息时发生异常: {}", e.getMessage(), e);
+        }
+    }
+
+    private void persistRealmHeartbeat(String id, String payload) {
+        try {
+            JSONObject info = JSONObject.parseObject(payload);
+            if (!info.containsKey("agent_version") && !info.containsKey("realm_version")) {
+                return;
+            }
+            Node node = nodeService.getById(Long.valueOf(id));
+            if (node == null) {
+                return;
+            }
+            node.setStatus(1);
+            setIfPresent(info, "agent_version", node::setAgentVersion);
+            setIfPresent(info, "realm_version", node::setRealmVersion);
+            setIfPresent(info, "realm_binary_path", node::setRealmBinaryPath);
+            setIfPresent(info, "realm_config_dir", node::setRealmConfigDir);
+            setIfPresent(info, "realm_process_name", node::setRealmProcessName);
+            setIfPresent(info, "realm_service_name", node::setRealmServiceName);
+            setIfPresent(info, "agent_process_name", node::setAgentProcessName);
+            setIfPresent(info, "instance_name", node::setInstanceName);
+            setIfPresent(info, "os", node::setOs);
+            setIfPresent(info, "distro", node::setDistro);
+            setIfPresent(info, "os_version", node::setOsVersion);
+            setIfPresent(info, "arch", node::setArch);
+            setIfPresent(info, "libc", node::setLibc);
+            setIfPresent(info, "init_system", node::setInitSystem);
+            setIfPresent(info, "container_type", node::setContainerType);
+            setIfPresent(info, "config_hash", node::setConfigHash);
+            node.setEndpointCount(info.getInteger("endpoint_count"));
+            node.setActiveForwardCount(info.getInteger("active_forward_count"));
+            node.setActiveTunnelCount(info.getInteger("active_tunnel_count"));
+            setIfPresent(info, "last_apply_time", node::setLastApplyId);
+            Boolean lastApplyStatus = info.getBoolean("last_apply_status");
+            if (lastApplyStatus != null) {
+                node.setLastApplyStatus(lastApplyStatus ? 1 : 0);
+            }
+            setIfPresent(info, "last_apply_error", node::setLastApplyError);
+            JSONObject capabilities = info.getJSONObject("capabilities");
+            if (capabilities != null) {
+                node.setCapabilitiesJson(capabilities.toJSONString());
+            }
+            Object processes = info.get("currently_running_processes");
+            if (processes != null) {
+                node.setRunningProcessesJson(JSON.toJSONString(processes));
+            }
+            Object lastApply = info.get("last_apply");
+            if (lastApply != null) {
+                node.setLastApplyJson(JSON.toJSONString(lastApply));
+            }
+            node.setUpdatedTime(System.currentTimeMillis());
+            nodeService.updateById(node);
+        } catch (Exception e) {
+            log.info("保存 Realm 节点心跳失败: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Persists per-endpoint traffic samples sent by the agent.
+     * Handles both nftables/iptables deltas and procfs node-level samples.
+     */
+    private void persistTrafficSamples(String nodeIdStr, String payload) {
+        try {
+            JSONObject msg = JSONObject.parseObject(payload);
+            JSONArray samples = msg.getJSONArray("samples");
+            if (samples == null || samples.isEmpty()) return;
+            Long nodeId = Long.valueOf(nodeIdStr);
+            long now = System.currentTimeMillis();
+            for (int i = 0; i < samples.size(); i++) {
+                JSONObject s = samples.getJSONObject(i);
+                TrafficSample ts = new TrafficSample();
+                ts.setNodeId(nodeId);
+                Long fid = s.getLong("forward_id");
+                Long tid = s.getLong("tunnel_id");
+                Long uid = s.getLong("user_id");
+                ts.setForwardId(fid);
+                ts.setTunnelId(tid);
+                ts.setUserId(uid);
+                ts.setListenPort(s.getInteger("listen_port"));
+                ts.setProtocol(s.getString("protocol"));
+                ts.setInBytes(s.getLong("in_bytes"));
+                ts.setOutBytes(s.getLong("out_bytes"));
+                ts.setTotalBytes(s.getLong("total_bytes"));
+                ts.setBillingBytes(s.getLong("billing_bytes"));
+                ts.setSampleTime(s.getLong("sample_time") != null ? s.getLong("sample_time") : now);
+                ts.setMethod(s.getString("method"));
+                trafficSampleService.save(ts);
+            }
+            log.info("节点 {} 流量采样数据已保存: {} 条", nodeIdStr, samples.size());
+        } catch (Exception e) {
+            log.info("保存流量采样数据失败: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Persists a latency sample sent by the agent via LatencyProbeResponse.
+     */
+    private void persistLatencySample(String nodeIdStr, String payload) {
+        try {
+            JSONObject msg = JSONObject.parseObject(payload);
+            // Support both direct sample and wrapped in {data: {...}}
+            JSONObject data = msg.containsKey("data") ? msg.getJSONObject("data") : msg;
+            if (data == null || !data.containsKey("target")) return;
+            Long nodeId = Long.valueOf(nodeIdStr);
+            LatencySample ls = new LatencySample();
+            ls.setNodeId(nodeId);
+            ls.setTunnelId(data.getLong("tunnel_id"));
+            ls.setForwardId(data.getLong("forward_id"));
+            ls.setProtocol(data.getString("protocol") != null ? data.getString("protocol") : "tcp");
+            ls.setProbeMode(data.getString("probe_mode") != null ? data.getString("probe_mode") : "tcp_connect");
+            ls.setTarget(data.getString("target"));
+            Integer success = data.getInteger("success");
+            ls.setSuccess(success != null ? success : 0);
+            Double latMs = data.getDouble("latency_ms");
+            if (latMs != null) ls.setLatencyMs(java.math.BigDecimal.valueOf(latMs));
+            Double jitterMs = data.getDouble("jitter_ms");
+            if (jitterMs != null) ls.setJitterMs(java.math.BigDecimal.valueOf(jitterMs));
+            ls.setError(data.getString("error"));
+            Long sampledAt = data.getLong("sampled_at");
+            ls.setSampledAt(sampledAt != null ? sampledAt : System.currentTimeMillis());
+            latencySampleService.save(ls);
+            log.info("节点 {} 延迟采样数据已保存: target={}, latencyMs={}", nodeIdStr, ls.getTarget(), ls.getLatencyMs());
+        } catch (Exception e) {
+            log.info("保存延迟采样数据失败: {}", e.getMessage());
+        }
+    }
+
+    private void setIfPresent(JSONObject info, String key, java.util.function.Consumer<String> setter) {
+        String value = info.getString(key);
+        if (value != null) {
+            setter.accept(value);
         }
     }
 

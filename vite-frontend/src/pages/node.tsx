@@ -29,6 +29,25 @@ interface Node {
   portSta: number;
   portEnd: number;
   version?: string;
+  agentVersion?: string;
+  realmVersion?: string;
+  realmProcessName?: string;
+  realmServiceName?: string;
+  agentProcessName?: string;
+  instanceName?: string;
+  distro?: string;
+  osVersion?: string;
+  arch?: string;
+  libc?: string;
+  initSystem?: string;
+  containerType?: string;
+  capabilitiesJson?: string;
+  configHash?: string;
+  endpointCount?: number;
+  activeForwardCount?: number;
+  activeTunnelCount?: number;
+  lastApplyStatus?: number;
+  lastApplyError?: string;
   http?: number; // 0 关 1 开
   tls?: number;  // 0 关 1 开
   socks?: number; // 0 关 1 开
@@ -228,6 +247,27 @@ export default function NodePage() {
             return {
               ...node,
               connectionStatus: 'online',
+              agentVersion: systemInfo.agent_version || node.agentVersion,
+              realmVersion: systemInfo.realm_version || node.realmVersion,
+              realmProcessName: systemInfo.realm_process_name || node.realmProcessName,
+              realmServiceName: systemInfo.realm_service_name || node.realmServiceName,
+              agentProcessName: systemInfo.agent_process_name || node.agentProcessName,
+              instanceName: systemInfo.instance_name || node.instanceName,
+              distro: systemInfo.distro || node.distro,
+              osVersion: systemInfo.os_version || node.osVersion,
+              arch: systemInfo.arch || node.arch,
+              libc: systemInfo.libc || node.libc,
+              initSystem: systemInfo.init_system || node.initSystem,
+              containerType: systemInfo.container_type || node.containerType,
+              capabilitiesJson: systemInfo.capabilities ? JSON.stringify(systemInfo.capabilities) : node.capabilitiesJson,
+              configHash: systemInfo.config_hash || node.configHash,
+              endpointCount: systemInfo.endpoint_count ?? node.endpointCount,
+              activeForwardCount: systemInfo.active_forward_count ?? node.activeForwardCount,
+              activeTunnelCount: systemInfo.active_tunnel_count ?? node.activeTunnelCount,
+              lastApplyStatus: typeof systemInfo.last_apply_status === 'boolean'
+                ? (systemInfo.last_apply_status ? 1 : 0)
+                : node.lastApplyStatus,
+              lastApplyError: systemInfo.last_apply_error || node.lastApplyError,
               systemInfo: {
                 cpuUsage: parseFloat(systemInfo.cpu_usage) || 0,
                 memoryUsage: parseFloat(systemInfo.memory_usage) || 0,
@@ -335,6 +375,23 @@ export default function NodePage() {
     if (value <= 50) return "success";
     if (value <= 80) return "warning";
     return "danger";
+  };
+
+  const parseCapabilities = (node: Node): Record<string, any> => {
+    if (!node.capabilitiesJson) return {};
+    try {
+      return typeof node.capabilitiesJson === 'string'
+        ? JSON.parse(node.capabilitiesJson)
+        : node.capabilitiesJson;
+    } catch {
+      return {};
+    }
+  };
+
+  const realmApplyText = (node: Node) => {
+    if (node.lastApplyStatus === 1) return { text: '应用成功', color: 'success' as const };
+    if (node.lastApplyStatus === 0 && node.lastApplyError) return { text: '应用失败', color: 'danger' as const };
+    return { text: '等待配置', color: 'default' as const };
   };
 
   // 验证IP地址格式
@@ -634,7 +691,10 @@ export default function NodePage() {
           </Card>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
-            {nodeList.map((node) => (
+            {nodeList.map((node) => {
+              const capabilities = parseCapabilities(node);
+              const applyState = realmApplyText(node);
+              return (
               <Card 
                 key={node.id} 
                 className="shadow-sm border border-divider hover:shadow-md transition-shadow duration-200"
@@ -682,8 +742,33 @@ export default function NodePage() {
                       <span className="text-xs">{node.portSta}-{node.portEnd}</span>
                     </div>
                     <div className="flex justify-between text-sm">
-                      <span className="text-default-600">版本</span>
-                      <span className="text-xs">{node.version || '未知'}</span>
+                      <span className="text-default-600">Realm</span>
+                      <span className="text-xs truncate max-w-40" title={node.realmVersion || node.version || '未知'}>
+                        {node.realmVersion || node.version || '未知'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-default-600">实例</span>
+                      <span className="text-xs">{node.instanceName || 'default'} / {node.realmProcessName || 'flux-realm'}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-default-600">系统</span>
+                      <span className="text-xs">{node.distro || '-'} {node.arch || ''} {node.libc || ''}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-default-600">统计</span>
+                      <span className="text-xs">
+                        {capabilities.traffic_stats_method || '-'}
+                        {capabilities.traffic_stats_reason ? '（受限）' : ''}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-sm items-center">
+                      <span className="text-default-600">应用状态</span>
+                      <Chip size="sm" variant="flat" color={applyState.color}>{applyState.text}</Chip>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-default-600">Endpoints</span>
+                      <span className="text-xs">{node.endpointCount ?? 0}</span>
                     </div>
                     <div className="flex justify-between text-sm">
                       <span className="text-default-600">开机时间</span>
@@ -820,7 +905,8 @@ export default function NodePage() {
                   </div>
                 </CardBody>
               </Card>
-            ))}
+              );
+            })}
           </div>
         )}
 

@@ -63,6 +63,16 @@ export const resumeForwardService = (forwardId: number) => Network.post("/forwar
 // 转发诊断操作
 export const diagnoseForward = (forwardId: number) => Network.post("/forward/diagnose", { forwardId });
 
+// Realm 延迟采样/探测
+export const getLatencySamples = (params: any = {}) => Network.get("/latency/samples", params);
+export const getLatencyAggregates = (params: any = {}) => Network.get("/latency/aggregates", params);
+export const probeLatency = (data: any) => Network.post("/latency/probe", data);
+export const updateLatencyConfig = (data: any) => Network.patch("/latency/config", data);
+
+// 流量统计
+export const getTrafficSamples = (params: any = {}) => Network.get("/traffic/samples", params);
+export const getTrafficSummary = (params: any = {}) => Network.get("/traffic/summary", params);
+
 // 转发排序操作
 export const updateForwardOrder = (data: { forwards: Array<{ id: number; inx: number }> }) => Network.post("/forward/update-order", data);
 

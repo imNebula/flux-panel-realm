@@ -362,17 +362,22 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
 
         StringBuilder command = new StringBuilder();
         
-        // 第一部分：下载安装脚本  
-        command.append("curl -L https://github.com/bqlpfy/flux-panel/releases/download/1.4.3/install.sh")
+        // 第一部分：下载 Realm agent 安装脚本
+        command.append("curl -L https://github.com/imNebula/flux-panel-realm/releases/latest/download/install.sh")
                .append(" -o ./install.sh && chmod +x ./install.sh && ");
         
         // 处理服务器地址，如果是IPv6需要添加方括号
         String processedServerAddr = processServerAddress(viteConfig.getValue());
         
         // 第二部分：执行安装脚本（去掉-u参数）
-        command.append("./install.sh")
-               .append(" -a ").append(processedServerAddr)  // 服务器地址
-               .append(" -s ").append(node.getSecret());    // 节点密钥
+        command.append("./install.sh install")
+               .append(" --server-addr ").append(processedServerAddr)
+               .append(" --secret ").append(node.getSecret())
+               .append(" --agent-process-name flux-realm-agent")
+               .append(" --realm-process-name flux-realm")
+               .append(" --service-name flux-realm-agent")
+               .append(" --instance default")
+               .append(" --mode single");
         
         return R.ok(command.toString());
     }

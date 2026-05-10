@@ -38,4 +38,54 @@ public class Node extends BaseEntity {
 
     private Integer socks;
 
+    private String agentVersion;
+
+    private String realmVersion;
+
+    private String realmBinaryPath;
+
+    private String realmConfigDir;
+
+    private String realmProcessName;
+
+    private String realmServiceName;
+
+    private String agentProcessName;
+
+    private String instanceName;
+
+    private String os;
+
+    private String distro;
+
+    private String osVersion;
+
+    private String arch;
+
+    private String libc;
+
+    private String initSystem;
+
+    private String containerType;
+
+    private String capabilitiesJson;
+
+    private String runningProcessesJson;
+
+    private String configHash;
+
+    private Integer endpointCount;
+
+    private Integer activeForwardCount;
+
+    private Integer activeTunnelCount;
+
+    private String lastApplyId;
+
+    private Integer lastApplyStatus;
+
+    private String lastApplyError;
+
+    private String lastApplyJson;
+
 }

@@ -777,10 +777,15 @@ export default function TunnelPage() {
                       <>
                         <Divider />
                         <h3 className="text-lg font-semibold">出口配置</h3>
+                        <Alert
+                          color="primary"
+                          variant="flat"
+                          description="Realm 隧道仅提供 TCP/UDP relay 与 tls/ws/wss transport。旧 Gost 的 mtls/mwss/mtcp/quic/kcp 等配置会保留记录，但不会允许新建。"
+                        />
 
                         <Select
-                          label="协议类型"
-                          placeholder="请选择协议类型"
+                          label="Realm remote transport"
+                          placeholder="请选择 Realm transport"
                           selectedKeys={[form.protocol]}
                           onSelectionChange={(keys) => {
                             const selectedKey = Array.from(keys)[0] as string;
@@ -792,12 +797,10 @@ export default function TunnelPage() {
                           errorMessage={errors.protocol}
                           variant="bordered"
                         >
+                          <SelectItem key="tcp">TCP / 无 transport</SelectItem>
                           <SelectItem key="tls">TLS</SelectItem>
+                          <SelectItem key="ws">WS</SelectItem>
                           <SelectItem key="wss">WSS</SelectItem>
-                          <SelectItem key="tcp">TCP</SelectItem>
-                          <SelectItem key="mtls">MTLS</SelectItem>
-                          <SelectItem key="mwss">MWSS</SelectItem>
-                          <SelectItem key="mtcp">MTCP</SelectItem>
                         </Select>
 
                         <Select

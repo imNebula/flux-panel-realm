@@ -136,6 +136,38 @@ const Network = {
            resolve({"code": -1, "msg": error.message || "网络请求失败", "data": null as T});
          });
     });
+  },
+
+  patch: function<T = any>(path: string = '', data: any = {}): Promise<ApiResponse<T>> {
+    return new Promise(function(resolve) {
+      if (baseURL === '') {
+        resolve({"code": -1, "msg": " - 请先设置面板地址", "data": null as T});
+        return;
+      }
+
+      axios.patch(path, data, {
+        timeout: 30000,
+        headers: {
+          "Authorization": window.localStorage.getItem('token'),
+          "Content-Type": "application/json"
+        }
+      })
+        .then(function(response: AxiosResponse<ApiResponse<T>>) {
+          if (isTokenExpired(response.data)) {
+            handleTokenExpired();
+            return;
+          }
+          resolve(response.data);
+        })
+        .catch(function(error: any) {
+          console.error('PATCH请求错误:', error);
+          if (error.response && error.response.status === 401) {
+            handleTokenExpired();
+            return;
+          }
+          resolve({"code": -1, "msg": error.message || "网络请求失败", "data": null as T});
+        });
+    });
   }
 };
 
