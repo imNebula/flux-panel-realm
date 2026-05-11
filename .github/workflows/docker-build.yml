@@ -20,7 +20,7 @@ jobs:
       should_build_agent: ${{ steps.check-tag.outputs.should_build_agent }}
       tag_exists: ${{ steps.check-tag.outputs.tag_exists }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -63,15 +63,16 @@ jobs:
     if: needs.check-version.outputs.should_build_agent == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
           go-version: '1.22'
+          cache-dependency-path: realm-agent/go.sum
 
       - name: Cache Go modules
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cache/go-build
@@ -141,24 +142,46 @@ jobs:
     needs: check-version
     if: needs.check-version.outputs.should_build == 'true'
     runs-on: ubuntu-latest
+    outputs:
+      docker_pushed: ${{ steps.dockerhub.outputs.enabled }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
+          cache-dependency-path: vite-frontend/package-lock.json
+
+      - name: Check DockerHub credentials
+        id: dockerhub
+        env:
+          DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
+          DOCKER_HUB_TOKEN: ${{ secrets.DOCKER_HUB_TOKEN }}
+        run: |
+          if [ -n "$DOCKER_HUB_USERNAME" ] && [ -n "$DOCKER_HUB_TOKEN" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::DockerHub credentials are not configured; building frontend image without pushing. Release creation will be skipped."
+          fi
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+        uses: docker/setup-buildx-action@v3
 
       - name: Log in to DockerHub
-        uses: docker/login-action@v2
+        if: steps.dockerhub.outputs.enabled == 'true'
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_HUB_USERNAME }}
           password: ${{ secrets.DOCKER_HUB_TOKEN }}
 
       - name: Build and push Vite Docker images
+        if: steps.dockerhub.outputs.enabled == 'true'
         run: |
           VERSION="${{ needs.check-version.outputs.version }}"
           docker buildx build \
@@ -168,22 +191,32 @@ jobs:
             -t bqlpfy/vite-frontend:${VERSION} \
             ./vite-frontend
 
+      - name: Build Vite Docker images
+        if: steps.dockerhub.outputs.enabled != 'true'
+        run: |
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            ./vite-frontend
+
   build-java:
     name: Build & Push Spring Boot Backend
     needs: check-version
     if: needs.check-version.outputs.should_build == 'true'
     runs-on: ubuntu-latest
+    outputs:
+      docker_pushed: ${{ steps.dockerhub.outputs.enabled }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Set up JDK and Maven
-        uses: actions/setup-java@v3
+        uses: actions/setup-java@v4
         with:
           java-version: 21
           distribution: 'temurin'
+          cache: maven
 
       - name: Cache Maven dependencies
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ~/.m2
           key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
@@ -193,16 +226,34 @@ jobs:
         working-directory: ./springboot-backend
         run: mvn clean package -DskipTests
 
+      - name: Check DockerHub credentials
+        id: dockerhub
+        env:
+          DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
+          DOCKER_HUB_TOKEN: ${{ secrets.DOCKER_HUB_TOKEN }}
+        run: |
+          if [ -n "$DOCKER_HUB_USERNAME" ] && [ -n "$DOCKER_HUB_TOKEN" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::DockerHub credentials are not configured; building backend image without pushing. Release creation will be skipped."
+          fi
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+        uses: docker/setup-buildx-action@v3
 
       - name: Log in to DockerHub
-        uses: docker/login-action@v2
+        if: steps.dockerhub.outputs.enabled == 'true'
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_HUB_USERNAME }}
           password: ${{ secrets.DOCKER_HUB_TOKEN }}
 
       - name: Build and push Java Docker images
+        if: steps.dockerhub.outputs.enabled == 'true'
         run: |
           VERSION="${{ needs.check-version.outputs.version }}"
           docker buildx build \
@@ -212,15 +263,22 @@ jobs:
             -t bqlpfy/springboot-backend:${VERSION} \
             ./springboot-backend
 
+      - name: Build Java Docker images
+        if: steps.dockerhub.outputs.enabled != 'true'
+        run: |
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            ./springboot-backend
+
   create-release:
     name: Create Release and Tag
     needs: [check-version, build-agent, build-vite, build-java]
-    if: needs.check-version.outputs.should_build == 'true'
+    if: needs.check-version.outputs.should_build == 'true' && needs.build-vite.outputs.docker_pushed == 'true' && needs.build-java.outputs.docker_pushed == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Download agent AMD64 binary
         uses: actions/download-artifact@v4
@@ -289,7 +347,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Download agent AMD64 binary
         uses: actions/download-artifact@v4
@@ -332,7 +390,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Update Release Files
         env:
