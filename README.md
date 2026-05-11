@@ -1,5 +1,5 @@
 # flux-panel-realm 转发面板
-
+> ⚠️ 项目暂无完成开发，请勿使用
 本仓库是 [bqlpfy/flux-panel](https://github.com/bqlpfy/flux-panel) 的衍生版本。感谢原作者的开源贡献。  
 原项目基于 Gost 实现，本项目已将其核心组件完全迁移为基于 [zhboner/realm](https://github.com/zhboner/realm) v2 的转发面板。底层服务迁移至原生的 Realm 实现。
 
