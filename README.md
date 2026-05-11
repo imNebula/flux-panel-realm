@@ -1,7 +1,9 @@
 # flux-panel-realm 转发面板
 
 本仓库是 [bqlpfy/flux-panel](https://github.com/bqlpfy/flux-panel) 的衍生版本。感谢原作者的开源贡献。  
-原项目基于 Gost 实现，本项目已将其核心组件完全迁移为基于 [zhboner/realm](https://github.com/zhboner/realm) v2 的转发面板。底层服务与节点通信彻底摆脱了遗留 Gost 协议的束缚，通过 WebSocket 实现了原生的 Realm 配置动态下发与应用。
+原项目基于 Gost 实现，本项目已将其核心组件完全迁移为基于 [zhboner/realm](https://github.com/zhboner/realm) v2 的转发面板。底层服务迁移至原生的 Realm 实现。
+
+> ⚠️ 由于 Realm 支持的隧道加密协议较少，部分 Gost 协议无法使用。
 
 ---
 
@@ -21,6 +23,9 @@
 ### Docker Compose部署
 
 #### 快速部署
+
+> 节点段建议使用面板快速生成
+
 面板端(稳定版)：
 ```bash
 curl -L https://raw.githubusercontent.com/imNebula/flux-panel-realm/refs/heads/main/panel_install.sh -o panel_install.sh && chmod +x panel_install.sh && ./panel_install.sh
