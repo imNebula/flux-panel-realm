@@ -8,9 +8,14 @@ export LC_ALL=C
 
 
 # 全局下载地址配置
-DOCKER_COMPOSEV4_URL="https://github.com/bqlpfy/flux-panel/releases/download/1.4.3/docker-compose-v4.yml"
-DOCKER_COMPOSEV6_URL="https://github.com/bqlpfy/flux-panel/releases/download/1.4.3/docker-compose-v6.yml"
-REALM_SQL_URL="https://github.com/bqlpfy/flux-panel/releases/download/1.4.3/realm.sql"
+VERSION="0.0.1-realm"
+REPO_OWNER="imNebula"
+REPO_NAME="flux-panel-realm"
+RELEASE_BASE_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/${VERSION}"
+SOURCE_ARCHIVE_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}/archive/refs/tags/${VERSION}.tar.gz"
+DOCKER_COMPOSEV4_URL="${RELEASE_BASE_URL}/docker-compose-v4.yml"
+DOCKER_COMPOSEV6_URL="${RELEASE_BASE_URL}/docker-compose-v6.yml"
+REALM_SQL_URL="${RELEASE_BASE_URL}/realm.sql"
 
 COUNTRY=$(curl -s https://ipinfo.io/country)
 if [ "$COUNTRY" = "CN" ]; then
@@ -18,6 +23,7 @@ if [ "$COUNTRY" = "CN" ]; then
     DOCKER_COMPOSEV4_URL="https://ghfast.top/${DOCKER_COMPOSEV4_URL}"
     DOCKER_COMPOSEV6_URL="https://ghfast.top/${DOCKER_COMPOSEV6_URL}"
     REALM_SQL_URL="https://ghfast.top/${REALM_SQL_URL}"
+    SOURCE_ARCHIVE_URL="https://ghfast.top/${SOURCE_ARCHIVE_URL}"
 fi
 
 
@@ -47,6 +53,38 @@ check_docker() {
     exit 1
   fi
   echo "检测到 Docker 命令：$DOCKER_CMD"
+}
+
+ensure_build_sources() {
+  if [[ -f "springboot-backend/Dockerfile" && -f "vite-frontend/Dockerfile" ]]; then
+    echo "✅ 已找到本地构建源码"
+    return 0
+  fi
+
+  echo "🔽 下载面板源码用于本地构建..."
+  TMP_SOURCE_DIR=".flux-panel-source"
+  rm -rf "$TMP_SOURCE_DIR"
+  mkdir -p "$TMP_SOURCE_DIR"
+
+  curl -L -o "$TMP_SOURCE_DIR/source.tar.gz" "$SOURCE_ARCHIVE_URL"
+  tar -xzf "$TMP_SOURCE_DIR/source.tar.gz" --strip-components=1 -C "$TMP_SOURCE_DIR"
+
+  if [[ ! -d "$TMP_SOURCE_DIR/springboot-backend" || ! -d "$TMP_SOURCE_DIR/vite-frontend" ]]; then
+    echo "❌ 源码包不完整，缺少 springboot-backend 或 vite-frontend"
+    rm -rf "$TMP_SOURCE_DIR"
+    exit 1
+  fi
+
+  rm -rf springboot-backend vite-frontend
+  cp -R "$TMP_SOURCE_DIR/springboot-backend" ./springboot-backend
+  cp -R "$TMP_SOURCE_DIR/vite-frontend" ./vite-frontend
+
+  if [[ ! -f "realm.sql" && -f "$TMP_SOURCE_DIR/realm.sql" ]]; then
+    cp "$TMP_SOURCE_DIR/realm.sql" ./realm.sql
+  fi
+
+  rm -rf "$TMP_SOURCE_DIR"
+  echo "✅ 本地构建源码准备完成"
 }
 
 # 检测系统是否支持 IPv6
@@ -197,6 +235,7 @@ install_panel() {
   DOCKER_COMPOSE_URL=$(get_docker_compose_url)
   echo "📡 选择配置文件：$(basename "$DOCKER_COMPOSE_URL")"
   curl -L -o docker-compose.yml "$DOCKER_COMPOSE_URL"
+  ensure_build_sources
 
   # 检查 realm.sql 是否已存在
   if [[ -f "realm.sql" ]]; then
@@ -222,8 +261,8 @@ FRONTEND_PORT=$FRONTEND_PORT
 BACKEND_PORT=$BACKEND_PORT
 EOF
 
-  echo "🚀 启动 docker 服务..."
-  $DOCKER_CMD up -d
+  echo "🚀 本地构建并启动 docker 服务..."
+  $DOCKER_CMD up -d --build
 
   echo "🎉 部署完成"
   echo "🌐 访问地址: http://服务器IP:$FRONTEND_PORT"
@@ -244,6 +283,7 @@ update_panel() {
   DOCKER_COMPOSE_URL=$(get_docker_compose_url)
   echo "📡 选择配置文件：$(basename "$DOCKER_COMPOSE_URL")"
   curl -L -o docker-compose.yml "$DOCKER_COMPOSE_URL"
+  ensure_build_sources
   echo "✅ 下载完成"
 
   # 自动检测并配置 IPv6 支持
@@ -255,11 +295,8 @@ update_panel() {
   echo "🛑 停止当前服务..."
   $DOCKER_CMD down
 
-  echo "⬇️ 拉取最新镜像..."
-  $DOCKER_CMD pull
-
-  echo "🚀 启动更新后的服务..."
-  $DOCKER_CMD up -d
+  echo "🚀 本地构建并启动更新后的服务..."
+  $DOCKER_CMD up -d --build
 
   # 等待服务启动
   echo "⏳ 等待服务启动..."

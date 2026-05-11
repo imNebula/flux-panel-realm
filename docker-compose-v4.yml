@@ -26,7 +26,10 @@ services:
       retries: 10
 
   backend:
-    image: bqlpfy/springboot-backend:1.4.3
+    image: flux-panel-realm/springboot-backend:0.0.1-realm
+    build:
+      context: ./springboot-backend
+      dockerfile: Dockerfile
     container_name: springboot-backend
     restart: unless-stopped
     environment:
@@ -54,7 +57,10 @@ services:
       start_period: 90s
 
   frontend:
-    image: bqlpfy/vite-frontend:1.4.3
+    image: flux-panel-realm/vite-frontend:0.0.1-realm
+    build:
+      context: ./vite-frontend
+      dockerfile: Dockerfile
     container_name: vite-frontend
     restart: unless-stopped
     ports:

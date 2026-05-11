@@ -1,4 +1,4 @@
-name: Build and Push Images Based on Version
+name: Build Images and Release Based on Version
 
 # 在这里定义统一版本号
 env:
@@ -138,12 +138,10 @@ jobs:
           path: ./realm-agent/flux-realm-agent-armv7
 
   build-vite:
-    name: Build & Push Vite Frontend
+    name: Build Vite Frontend Image
     needs: check-version
     if: needs.check-version.outputs.should_build == 'true'
     runs-on: ubuntu-latest
-    outputs:
-      docker_pushed: ${{ steps.dockerhub.outputs.enabled }}
     steps:
       - uses: actions/checkout@v4
 
@@ -154,57 +152,23 @@ jobs:
           cache: npm
           cache-dependency-path: vite-frontend/package-lock.json
 
-      - name: Check DockerHub credentials
-        id: dockerhub
-        env:
-          DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
-          DOCKER_HUB_TOKEN: ${{ secrets.DOCKER_HUB_TOKEN }}
-        run: |
-          if [ -n "$DOCKER_HUB_USERNAME" ] && [ -n "$DOCKER_HUB_TOKEN" ]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::DockerHub credentials are not configured; building frontend image without pushing. Release creation will be skipped."
-          fi
-
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to DockerHub
-        if: steps.dockerhub.outputs.enabled == 'true'
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKER_HUB_USERNAME }}
-          password: ${{ secrets.DOCKER_HUB_TOKEN }}
-
-      - name: Build and push Vite Docker images
-        if: steps.dockerhub.outputs.enabled == 'true'
-        run: |
-          VERSION="${{ needs.check-version.outputs.version }}"
-          docker buildx build \
-            --platform linux/amd64,linux/arm64 \
-            --push \
-            -t bqlpfy/vite-frontend:latest \
-            -t bqlpfy/vite-frontend:${VERSION} \
-            ./vite-frontend
-
       - name: Build Vite Docker images
-        if: steps.dockerhub.outputs.enabled != 'true'
         run: |
           docker buildx build \
             --platform linux/amd64,linux/arm64 \
             ./vite-frontend
 
   build-java:
-    name: Build & Push Spring Boot Backend
+    name: Build Spring Boot Backend Image
     needs: check-version
     if: needs.check-version.outputs.should_build == 'true'
     runs-on: ubuntu-latest
-    outputs:
-      docker_pushed: ${{ steps.dockerhub.outputs.enabled }}
     steps:
       - uses: actions/checkout@v4
 
@@ -226,45 +190,13 @@ jobs:
         working-directory: ./springboot-backend
         run: mvn clean package -DskipTests
 
-      - name: Check DockerHub credentials
-        id: dockerhub
-        env:
-          DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
-          DOCKER_HUB_TOKEN: ${{ secrets.DOCKER_HUB_TOKEN }}
-        run: |
-          if [ -n "$DOCKER_HUB_USERNAME" ] && [ -n "$DOCKER_HUB_TOKEN" ]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::DockerHub credentials are not configured; building backend image without pushing. Release creation will be skipped."
-          fi
-
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to DockerHub
-        if: steps.dockerhub.outputs.enabled == 'true'
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKER_HUB_USERNAME }}
-          password: ${{ secrets.DOCKER_HUB_TOKEN }}
-
-      - name: Build and push Java Docker images
-        if: steps.dockerhub.outputs.enabled == 'true'
-        run: |
-          VERSION="${{ needs.check-version.outputs.version }}"
-          docker buildx build \
-            --platform linux/amd64,linux/arm64 \
-            --push \
-            -t bqlpfy/springboot-backend:latest \
-            -t bqlpfy/springboot-backend:${VERSION} \
-            ./springboot-backend
-
       - name: Build Java Docker images
-        if: steps.dockerhub.outputs.enabled != 'true'
         run: |
           docker buildx build \
             --platform linux/amd64,linux/arm64 \
@@ -273,7 +205,7 @@ jobs:
   create-release:
     name: Create Release and Tag
     needs: [check-version, build-agent, build-vite, build-java]
-    if: needs.check-version.outputs.should_build == 'true' && needs.build-vite.outputs.docker_pushed == 'true' && needs.build-java.outputs.docker_pushed == 'true'
+    if: needs.check-version.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -336,6 +268,7 @@ jobs:
           echo "📤 上传 Docker Compose 配置文件..."
           gh release upload "${VERSION}" ./docker-compose-v4.yml --clobber
           gh release upload "${VERSION}" ./docker-compose-v6.yml --clobber
+          gh release upload "${VERSION}" ./realm.sql --clobber
           
           echo "✅ 所有文件已上传到 Release ${VERSION}"
 
@@ -409,6 +342,7 @@ jobs:
           echo "📤 更新 Docker Compose 配置文件..."
           gh release upload "${VERSION}" ./docker-compose-v4.yml --clobber
           gh release upload "${VERSION}" ./docker-compose-v6.yml --clobber
+          gh release upload "${VERSION}" ./realm.sql --clobber
           
           echo "✅ 文件更新完成！Release ${VERSION} 中的脚本和配置已更新"
           echo "ℹ️ Docker 镜像和 Agent 二进制未重新构建"
