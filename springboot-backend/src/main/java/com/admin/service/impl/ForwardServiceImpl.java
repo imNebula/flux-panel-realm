@@ -104,8 +104,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         }
 
         // 7. 通知节点应用新配置
-        sendApplyConfig(nodeInfo.getInNode().getId());
-        if (nodeInfo.getOutNode() != null) sendApplyConfig(nodeInfo.getOutNode().getId());
+        syncNodeConfigForTunnel(tunnel);
 
         return R.ok();
     }
@@ -140,6 +139,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         if (existForward == null) {
             return R.err("转发不存在");
         }
+        Tunnel oldTunnel = validateTunnel(existForward.getTunnelId());
 
         // 3. 检查隧道是否存在和可用
         Tunnel tunnel = validateTunnel(forwardUpdateDto.getTunnelId());
@@ -222,8 +222,10 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         // 8. 通知节点应用新配置
         updatedForward.setStatus(1);
         boolean result = this.updateById(updatedForward);
-        sendApplyConfig(nodeInfo.getInNode().getId());
-        if (nodeInfo.getOutNode() != null) sendApplyConfig(nodeInfo.getOutNode().getId());
+        if (result) {
+            syncNodeConfigForTunnel(oldTunnel);
+            syncNodeConfigForTunnel(tunnel);
+        }
         return result ? R.ok("端口转发更新成功") : R.err("端口转发更新失败");
     }
 
@@ -265,8 +267,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         // 6. 删除转发记录，通知节点重新应用配置
         boolean result = this.removeById(id);
         if (result) {
-            sendApplyConfig(nodeInfo.getInNode().getId());
-            if (nodeInfo.getOutNode() != null) sendApplyConfig(nodeInfo.getOutNode().getId());
+            syncNodeConfigForTunnel(tunnel);
             return R.ok("端口转发删除成功");
         } else {
             return R.err("端口转发删除失败");
@@ -275,12 +276,12 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
 
     @Override
     public R pauseForward(Long id) {
-        return changeForwardStatus(id, FORWARD_STATUS_PAUSED, "暂停", "PauseService");
+        return changeForwardStatus(id, FORWARD_STATUS_PAUSED, "暂停");
     }
 
     @Override
     public R resumeForward(Long id) {
-        return changeForwardStatus(id, FORWARD_STATUS_ACTIVE, "恢复", "ResumeService");
+        return changeForwardStatus(id, FORWARD_STATUS_ACTIVE, "恢复");
     }
 
     @Override
@@ -293,10 +294,12 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         if (forward == null) {
             return R.err("端口转发不存在");
         }
+        Tunnel tunnel = validateTunnel(forward.getTunnelId());
 
-        // 3. 直接删除转发记录，跳过GOST服务删除
+        // 3. 直接删除转发记录，然后用完整 Realm 配置覆盖节点状态
         boolean result = this.removeById(id);
         if (result) {
+            syncNodeConfigForTunnel(tunnel);
             return R.ok("端口转发强制删除成功");
         } else {
             return R.err("端口转发强制删除失败");
@@ -306,7 +309,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
     /**
      * 改变转发状态（暂停/恢复）
      */
-    private R changeForwardStatus(Long id, int targetStatus, String operation, String gostMethod) {
+    private R changeForwardStatus(Long id, int targetStatus, String operation) {
         // 1. 获取当前用户信息
         UserInfo currentUser = getCurrentUserInfo();
 
@@ -374,22 +377,13 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
             return R.err(nodeInfo.getErrorMessage());
         }
 
-        // 8. 发送 Realm 暂停/恢复命令
-        String wsCmd = "PauseService".equals(gostMethod) ? "PauseForward" : "ResumeForward";
-        JSONObject cmdData = new JSONObject();
-        cmdData.put("forward_id", forward.getId());
-        WsResult wsResult = WebSocketServer.send_msg(nodeInfo.getInNode().getId(), cmdData, wsCmd);
-        if (wsResult != null && !WS_SUCCESS_MSG.equals(wsResult.getMsg())) {
-            log.warn("{} 命令返回非 OK: {}", wsCmd, wsResult.getMsg());
-        }
-        if (tunnel.getType() == TUNNEL_TYPE_TUNNEL_FORWARD && nodeInfo.getOutNode() != null) {
-            WebSocketServer.send_msg(nodeInfo.getOutNode().getId(), cmdData, wsCmd);
-        }
-
-        // 9. 更新转发状态
+        // 8. 更新转发状态，再用完整 Realm 配置覆盖节点状态
         forward.setStatus(targetStatus);
         forward.setUpdatedTime(System.currentTimeMillis());
         boolean result = this.updateById(forward);
+        if (result) {
+            syncNodeConfigForTunnel(tunnel);
+        }
         return result ? R.ok("服务已" + operation) : R.err("更新状态失败");
     }
 
@@ -938,18 +932,32 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
     }
 
     /**
-     * 发送 ApplyConfig 命令让 realm-agent 重新加载配置
+     * 推送完整 Realm 配置让 realm-agent 重新加载。
      */
     private void sendApplyConfig(Long nodeId) {
         try {
-            JSONObject cmd = new JSONObject();
-            cmd.put("action", "reload");
-            WsResult r = WebSocketServer.send_msg(nodeId, cmd, "ApplyConfig");
-            if (r != null && !WS_SUCCESS_MSG.equals(r.getMsg())) {
-                log.warn("节点 {} ApplyConfig 返回: {}", nodeId, r.getMsg());
-            }
+            realmConfigSyncAsync.syncNodeConfig(nodeId);
         } catch (Exception e) {
-            log.warn("节点 {} ApplyConfig 异常: {}", nodeId, e.getMessage());
+            log.warn("节点 {} Realm 配置同步异常: {}", nodeId, e.getMessage());
+        }
+    }
+
+    /**
+     * 根据隧道涉及的节点推送完整 Realm 配置。
+     */
+    private void syncNodeConfigForTunnel(Tunnel tunnel) {
+        if (tunnel == null) {
+            return;
+        }
+        Set<Long> nodeIds = new HashSet<>();
+        if (tunnel.getInNodeId() != null) {
+            nodeIds.add(tunnel.getInNodeId());
+        }
+        if (tunnel.getType() == TUNNEL_TYPE_TUNNEL_FORWARD && tunnel.getOutNodeId() != null) {
+            nodeIds.add(tunnel.getOutNodeId());
+        }
+        for (Long nodeId : nodeIds) {
+            sendApplyConfig(nodeId);
         }
     }
 
@@ -1113,10 +1121,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
     public void updateForwardA(Forward forward) {
         Tunnel tunnel = validateTunnel(forward.getTunnelId());
         if (tunnel == null) return;
-        NodeInfo nodeInfo = getRequiredNodes(tunnel);
-        if (nodeInfo.isHasError()) return;
-        sendApplyConfig(nodeInfo.getInNode().getId());
-        if (nodeInfo.getOutNode() != null) sendApplyConfig(nodeInfo.getOutNode().getId());
+        syncNodeConfigForTunnel(tunnel);
     }
 
 

@@ -1,6 +1,10 @@
 package realm
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
 
 func TestLegacyPortForwardToRealmEndpoint(t *testing.T) {
 	svc := LegacyService{
@@ -73,4 +77,38 @@ func TestUnsupportedGostProtocolIsMarkedUnsupported(t *testing.T) {
 	if !ep.Disabled || ep.Unsupported == "" {
 		t.Fatalf("expected unsupported endpoint, got %#v", ep)
 	}
+}
+
+func TestEndpointMetadataIsAcceptedButNotWrittenToRealmConfig(t *testing.T) {
+	raw := []byte(`{
+		"name": "forward-10-in",
+		"forward_id": 10,
+		"tunnel_id": 20,
+		"user_id": 30,
+		"listen": "0.0.0.0:18080",
+		"remote": "example.com:80"
+	}`)
+	var ep EndpointConfig
+	if err := json.Unmarshal(raw, &ep); err != nil {
+		t.Fatal(err)
+	}
+	if ep.Name != "forward-10-in" || ep.ForwardID != 10 || ep.TunnelID != 20 || ep.UserID != 30 {
+		t.Fatalf("metadata was not preserved for agent internals: %#v", ep)
+	}
+	out, err := json.Marshal(DefaultConfig("stdout", []EndpointConfig{ep}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) == "" || containsAny(string(out), []string{"forward_id", "tunnel_id", "user_id", "forward-10-in"}) {
+		t.Fatalf("internal metadata leaked into realm config: %s", out)
+	}
+}
+
+func containsAny(s string, parts []string) bool {
+	for _, part := range parts {
+		if strings.Contains(s, part) {
+			return true
+		}
+	}
+	return false
 }

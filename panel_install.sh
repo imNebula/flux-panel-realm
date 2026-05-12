@@ -8,7 +8,8 @@ export LC_ALL=C
 
 
 # 全局下载地址配置
-VERSION="0.0.1-realm"
+VERSION="${VERSION:-0.0.1-realm}"
+CHANNEL="${CHANNEL:-stable}"
 REPO_OWNER="imNebula"
 REPO_NAME="flux-panel-realm"
 RELEASE_BASE_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/${VERSION}"
@@ -16,6 +17,13 @@ SOURCE_ARCHIVE_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}/archive/refs/t
 DOCKER_COMPOSEV4_URL="${RELEASE_BASE_URL}/docker-compose-v4.yml"
 DOCKER_COMPOSEV6_URL="${RELEASE_BASE_URL}/docker-compose-v6.yml"
 REALM_SQL_URL="${RELEASE_BASE_URL}/realm.sql"
+
+if [[ "$CHANNEL" == "beta" || "$CHANNEL" == "dev" || "$CHANNEL" == "development" ]]; then
+    SOURCE_ARCHIVE_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}/archive/refs/heads/beta.tar.gz"
+    DOCKER_COMPOSEV4_URL="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/refs/heads/beta/docker-compose-v4.yml"
+    DOCKER_COMPOSEV6_URL="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/refs/heads/beta/docker-compose-v6.yml"
+    REALM_SQL_URL="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/refs/heads/beta/realm.sql"
+fi
 
 COUNTRY=$(curl -s https://ipinfo.io/country)
 if [ "$COUNTRY" = "CN" ]; then

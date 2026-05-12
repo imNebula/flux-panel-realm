@@ -15,7 +15,7 @@ jobs:
     name: Check Version and Decide Build
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ env.VERSION }}
+      version: ${{ steps.resolve-version.outputs.version }}
       should_build: ${{ steps.check-tag.outputs.should_build }}
       should_build_agent: ${{ steps.check-tag.outputs.should_build_agent }}
       tag_exists: ${{ steps.check-tag.outputs.tag_exists }}
@@ -24,20 +24,30 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Resolve channel version
+        id: resolve-version
+        run: |
+          VERSION="${{ env.VERSION }}"
+          if [[ "${GITHUB_REF_NAME}" == "beta" ]]; then
+            VERSION="${VERSION}-beta"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
       - name: Display version
         run: |
-          echo "Current version: ${{ env.VERSION }}"
+          echo "Current version: ${{ steps.resolve-version.outputs.version }}"
 
       - name: Check if tag exists and detect changes
         id: check-tag
         run: |
-          if git rev-parse "${{ env.VERSION }}" >/dev/null 2>&1; then
-            echo "Tag ${{ env.VERSION }} already exists"
+          VERSION="${{ steps.resolve-version.outputs.version }}"
+          if git rev-parse "${VERSION}" >/dev/null 2>&1; then
+            echo "Tag ${VERSION} already exists"
             echo "tag_exists=true" >> $GITHUB_OUTPUT
             echo "should_build=false" >> $GITHUB_OUTPUT
             
             # 检查从tag到现在，realm-agent目录下的文件是否有变化
-            TAG_COMMIT=$(git rev-list -n 1 "${{ env.VERSION }}")
+            TAG_COMMIT=$(git rev-list -n 1 "${VERSION}")
             echo "Tag commit: $TAG_COMMIT"
             echo "Current HEAD: $(git rev-parse HEAD)"
             
@@ -51,7 +61,7 @@ jobs:
               echo "should_build_agent=true" >> $GITHUB_OUTPUT
             fi
           else
-            echo "Tag ${{ env.VERSION }} does not exist, will build all components"
+            echo "Tag ${VERSION} does not exist, will build all components"
             echo "should_build=true" >> $GITHUB_OUTPUT
             echo "should_build_agent=true" >> $GITHUB_OUTPUT
             echo "tag_exists=false" >> $GITHUB_OUTPUT
@@ -70,16 +80,6 @@ jobs:
         with:
           go-version: '1.22'
           cache-dependency-path: realm-agent/go.sum
-
-      - name: Cache Go modules
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-realm-agent-${{ hashFiles('realm-agent/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-realm-agent-
 
       - name: Install UPX
         run: |
@@ -178,13 +178,6 @@ jobs:
           java-version: 21
           distribution: 'temurin'
           cache: maven
-
-      - name: Cache Maven dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.m2
-          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
-          restore-keys: ${{ runner.os }}-m2
 
       - name: Build Java JAR
         working-directory: ./springboot-backend

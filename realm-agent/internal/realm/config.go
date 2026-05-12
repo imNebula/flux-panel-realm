@@ -47,6 +47,9 @@ type NetworkConfig struct {
 
 type EndpointConfig struct {
 	Name            string         `json:"-"`
+	ForwardID       int64          `json:"-"`
+	TunnelID        int64          `json:"-"`
+	UserID          int64          `json:"-"`
 	Listen          string         `json:"listen"`
 	Remote          string         `json:"remote"`
 	ExtraRemotes    []string       `json:"extra_remotes,omitempty"`
@@ -59,6 +62,27 @@ type EndpointConfig struct {
 	Network         *NetworkConfig `json:"network,omitempty"`
 	Disabled        bool           `json:"-"`
 	Unsupported     string         `json:"-"`
+}
+
+func (e *EndpointConfig) UnmarshalJSON(data []byte) error {
+	type endpointConfigAlias EndpointConfig
+	aux := struct {
+		Name      string `json:"name"`
+		ForwardID int64  `json:"forward_id"`
+		TunnelID  int64  `json:"tunnel_id"`
+		UserID    int64  `json:"user_id"`
+		*endpointConfigAlias
+	}{
+		endpointConfigAlias: (*endpointConfigAlias)(e),
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	e.Name = aux.Name
+	e.ForwardID = aux.ForwardID
+	e.TunnelID = aux.TunnelID
+	e.UserID = aux.UserID
+	return nil
 }
 
 type LegacyService struct {

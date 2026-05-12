@@ -2,6 +2,9 @@
 set -euo pipefail
 
 REALM_VERSION="${REALM_VERSION:-v2.9.2-2}"
+AGENT_VERSION="${AGENT_VERSION:-latest}"
+REPO_OWNER="${REPO_OWNER:-imNebula}"
+REPO_NAME="${REPO_NAME:-flux-panel-realm}"
 SERVER_ADDR=""
 SECRET=""
 AGENT_NAME="flux-realm-agent"
@@ -110,6 +113,15 @@ realm_asset() {
   esac
 }
 
+agent_asset() {
+  case "$(detect_arch)" in
+    x86_64) echo "flux-realm-agent-amd64" ;;
+    aarch64) echo "flux-realm-agent-arm64" ;;
+    armv7) echo "flux-realm-agent-armv7" ;;
+    *) echo "unsupported"; return 1 ;;
+  esac
+}
+
 download() {
   local url="$1" out="$2"
   if [[ "$CHINA_MIRROR" == "1" ]]; then
@@ -145,6 +157,7 @@ install_realm() {
 }
 
 install_agent() {
+  local asset release_path
   if [[ -n "$AGENT_URL" ]]; then
     download "$AGENT_URL" "${INSTALL_DIR}/flux-realm-agent"
     chmod 0755 "${INSTALL_DIR}/flux-realm-agent"
@@ -158,8 +171,14 @@ install_agent() {
     install -m 0755 "./realm-agent/flux-realm-agent" "${INSTALL_DIR}/flux-realm-agent"
     return
   fi
-  echo "Agent binary missing. Set AGENT_URL or place ./flux-realm-agent next to install.sh." >&2
-  exit 1
+  asset="$(agent_asset)"
+  if [[ "$AGENT_VERSION" == "latest" ]]; then
+    release_path="latest/download"
+  else
+    release_path="download/${AGENT_VERSION}"
+  fi
+  download "https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/${release_path}/${asset}" "${INSTALL_DIR}/flux-realm-agent"
+  chmod 0755 "${INSTALL_DIR}/flux-realm-agent"
 }
 
 write_env() {
@@ -178,13 +197,12 @@ CONFIG_DIR='${CONFIG_DIR}'
 LOG_DIR='${LOG_DIR}'
 DATA_DIR='${DATA_DIR}'
 PID_FILE='${PID_FILE}'
+REALM_BINARY='${INSTALL_DIR}/realm'
 EOF
 }
 
 agent_cmd() {
   printf "%q " "${INSTALL_DIR}/flux-realm-agent" \
-    --server-addr "$SERVER_ADDR" \
-    --secret "$SECRET" \
     --agent-name "$AGENT_NAME" \
     --agent-process-name "$AGENT_PROCESS_NAME" \
     --realm-process-name "$REALM_PROCESS_NAME" \
@@ -197,6 +215,12 @@ agent_cmd() {
     --instance "$INSTANCE" \
     --mode "$MODE" \
     --realm-binary "${INSTALL_DIR}/realm"
+}
+
+export_runtime_env() {
+  export SERVER_ADDR SECRET AGENT_NAME AGENT_PROCESS_NAME REALM_PROCESS_NAME SERVICE_NAME
+  export INSTANCE MODE INSTALL_DIR CONFIG_DIR LOG_DIR DATA_DIR PID_FILE
+  export REALM_BINARY="${INSTALL_DIR}/realm"
 }
 
 detect_init() {
@@ -220,7 +244,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 EnvironmentFile=${ENV_FILE}
-ExecStart=${INSTALL_DIR}/flux-realm-agent --server-addr \${SERVER_ADDR} --secret \${SECRET} --agent-name \${AGENT_NAME} --agent-process-name \${AGENT_PROCESS_NAME} --realm-process-name \${REALM_PROCESS_NAME} --service-name \${SERVICE_NAME} --install-dir \${INSTALL_DIR} --config-dir \${CONFIG_DIR} --log-dir \${LOG_DIR} --data-dir \${DATA_DIR} --pid-file \${PID_FILE} --instance \${INSTANCE} --mode \${MODE} --realm-binary ${INSTALL_DIR}/realm
+ExecStart=${INSTALL_DIR}/flux-realm-agent --agent-name \${AGENT_NAME} --agent-process-name \${AGENT_PROCESS_NAME} --realm-process-name \${REALM_PROCESS_NAME} --service-name \${SERVICE_NAME} --install-dir \${INSTALL_DIR} --config-dir \${CONFIG_DIR} --log-dir \${LOG_DIR} --data-dir \${DATA_DIR} --pid-file \${PID_FILE} --instance \${INSTANCE} --mode \${MODE} --realm-binary ${INSTALL_DIR}/realm
 Restart=always
 RestartSec=5
 LimitNOFILE=1048576
@@ -236,7 +260,10 @@ EOF
 #!/sbin/openrc-run
 name="${SERVICE_NAME}"
 command="${INSTALL_DIR}/flux-realm-agent"
-command_args="--server-addr ${SERVER_ADDR} --secret ${SECRET} --agent-name ${AGENT_NAME} --agent-process-name ${AGENT_PROCESS_NAME} --realm-process-name ${REALM_PROCESS_NAME} --service-name ${SERVICE_NAME} --install-dir ${INSTALL_DIR} --config-dir ${CONFIG_DIR} --log-dir ${LOG_DIR} --data-dir ${DATA_DIR} --pid-file ${PID_FILE} --instance ${INSTANCE} --mode ${MODE} --realm-binary ${INSTALL_DIR}/realm"
+export SERVER_ADDR='${SERVER_ADDR}'
+export SECRET='${SECRET}'
+export REALM_BINARY='${INSTALL_DIR}/realm'
+command_args="--agent-name ${AGENT_NAME} --agent-process-name ${AGENT_PROCESS_NAME} --realm-process-name ${REALM_PROCESS_NAME} --service-name ${SERVICE_NAME} --install-dir ${INSTALL_DIR} --config-dir ${CONFIG_DIR} --log-dir ${LOG_DIR} --data-dir ${DATA_DIR} --pid-file ${PID_FILE} --instance ${INSTANCE} --mode ${MODE} --realm-binary ${INSTALL_DIR}/realm"
 command_background=true
 pidfile="${DATA_DIR}/${SERVICE_NAME}.openrc.pid"
 output_log="${LOG_DIR}/agent.log"
@@ -252,6 +279,7 @@ EOF
       cat > "/etc/supervisor/conf.d/${SERVICE_NAME}.conf" <<EOF
 [program:${SERVICE_NAME}]
 command=$(agent_cmd)
+environment=SERVER_ADDR="${SERVER_ADDR}",SECRET="${SECRET}",REALM_BINARY="${INSTALL_DIR}/realm"
 autostart=true
 autorestart=true
 stdout_logfile=${LOG_DIR}/agent.log
@@ -306,6 +334,7 @@ do_install() {
   install_realm
   install_agent
   write_env
+  export_runtime_env
   if [[ "$FOREGROUND" == "1" ]]; then
     exec $(agent_cmd)
   fi

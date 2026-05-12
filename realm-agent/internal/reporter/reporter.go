@@ -37,15 +37,15 @@ type Config struct {
 }
 
 type Reporter struct {
-	cfg        Config
-	env        platform.Environment
-	manager    *realm.Manager
-	aes        *crypto.AESCrypto
-	conn       *websocket.Conn
-	mu         sync.Mutex
-	collector  *traffic.Collector
+	cfg       Config
+	env       platform.Environment
+	manager   *realm.Manager
+	aes       *crypto.AESCrypto
+	conn      *websocket.Conn
+	mu        sync.Mutex
+	collector *traffic.Collector
 	// lastTrafficKeys tracks active endpoints for traffic collection.
-	lastKeys   []traffic.EndpointKey
+	lastKeys []traffic.EndpointKey
 	// latencyCfg is the per-agent latency sampling configuration.
 	latencyCfg traffic.LatencyConfig
 }
@@ -216,6 +216,9 @@ func (r *Reporter) handleCommand(cmd commandMessage) commandResponse {
 			return errResp("ApplyRealmConfigResponse", err)
 		}
 		res := r.manager.ApplyConfig(cfg, []string{"full-config"})
+		if res.Success {
+			r.updateTrafficEndpoints(endpointKeysFromConfig(cfg))
+		}
 		return applyResp("ApplyRealmConfigResponse", res)
 	case "TcpPing":
 		data, err := r.tcpPing(cmd.Data)
@@ -396,8 +399,14 @@ func (r *Reporter) decryptIfNeeded(msg []byte) []byte {
 
 func (r *Reporter) wsURL() string {
 	addr := r.cfg.ServerAddr
+	scheme := "ws"
+	if strings.HasPrefix(addr, "https://") || strings.HasPrefix(addr, "wss://") {
+		scheme = "wss"
+	}
 	addr = strings.TrimPrefix(addr, "http://")
 	addr = strings.TrimPrefix(addr, "https://")
+	addr = strings.TrimPrefix(addr, "ws://")
+	addr = strings.TrimPrefix(addr, "wss://")
 	q := url.Values{}
 	q.Set("type", "1")
 	q.Set("secret", r.cfg.Secret)
@@ -405,7 +414,44 @@ func (r *Reporter) wsURL() string {
 	q.Set("http", "0")
 	q.Set("tls", "1")
 	q.Set("socks", "0")
-	return "ws://" + addr + "/system-info?" + q.Encode()
+	return scheme + "://" + addr + "/system-info?" + q.Encode()
+}
+
+func endpointKeysFromConfig(cfg realm.Config) []traffic.EndpointKey {
+	keys := make([]traffic.EndpointKey, 0, len(cfg.Endpoints))
+	for _, ep := range cfg.Endpoints {
+		if ep.ForwardID == 0 {
+			continue
+		}
+		_, port, err := net.SplitHostPort(ep.Listen)
+		if err != nil {
+			continue
+		}
+		p, err := strconv.Atoi(port)
+		if err != nil || p <= 0 || p > 65535 {
+			continue
+		}
+		for _, proto := range endpointProtocols(ep) {
+			keys = append(keys, traffic.EndpointKey{
+				ForwardID: ep.ForwardID,
+				TunnelID:  ep.TunnelID,
+				UserID:    ep.UserID,
+				Port:      p,
+				Protocol:  proto,
+			})
+		}
+	}
+	return keys
+}
+
+func endpointProtocols(ep realm.EndpointConfig) []string {
+	if ep.Network != nil && ep.Network.UseUDP != nil && *ep.Network.UseUDP {
+		if ep.Network.NoTCP != nil && *ep.Network.NoTCP {
+			return []string{"udp"}
+		}
+		return []string{"tcp", "udp"}
+	}
+	return []string{"tcp"}
 }
 
 func namesFromPayload(data []byte) ([]string, error) {

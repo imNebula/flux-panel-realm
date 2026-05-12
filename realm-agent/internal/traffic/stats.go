@@ -38,6 +38,8 @@ type Sample struct {
 // EndpointKey uniquely identifies an endpoint for tracking purposes.
 type EndpointKey struct {
 	ForwardID int64
+	TunnelID  int64
+	UserID    int64
 	Port      int
 	Protocol  string // "tcp" | "udp"
 }
@@ -237,8 +239,8 @@ func parseNftCounters(raw []byte, chainName string) map[string][2]int64 {
 			continue
 		}
 		var rule struct {
-			Chain   string           `json:"chain"`
-			Comment string           `json:"comment"`
+			Chain   string            `json:"chain"`
+			Comment string            `json:"comment"`
 			Expr    []json.RawMessage `json:"expr"`
 		}
 		if err := json.Unmarshal(ruleRaw, &rule); err != nil {
@@ -455,6 +457,8 @@ func (c *Collector) computeDelta(key EndpointKey, inBytes, outBytes, now int64) 
 		ListenPort:   key.Port,
 		Protocol:     key.Protocol,
 		ForwardID:    key.ForwardID,
+		TunnelID:     key.TunnelID,
+		UserID:       key.UserID,
 		InBytes:      inDelta,
 		OutBytes:     outDelta,
 		TotalBytes:   total,

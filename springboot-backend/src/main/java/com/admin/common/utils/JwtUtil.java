@@ -10,6 +10,7 @@ import javax.annotation.PostConstruct;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.Base64;
 import java.util.Date;
 import java.util.HashMap;
@@ -102,7 +103,9 @@ public class JwtUtil {
 
             // 验证签名
             String expectedSignature = calculateSignature(encodedHeader, encodedPayload);
-            if (!expectedSignature.equals(signature)) {
+            if (!MessageDigest.isEqual(
+                    expectedSignature.getBytes(StandardCharsets.UTF_8),
+                    signature.getBytes(StandardCharsets.UTF_8))) {
                 return false;
             }
 

@@ -39,6 +39,8 @@ func main() {
 	flag.BoolVar(&cfg.PrintVersion, "version", false, "print version")
 	flag.Parse()
 
+	applyEnvFallbacks(&cfg)
+
 	if cfg.PrintVersion {
 		fmt.Printf("flux-realm-agent %s\n", Version)
 		return
@@ -88,5 +90,50 @@ func main() {
 
 	if err := r.Run(ctx); err != nil && ctx.Err() == nil {
 		log.Fatal(err)
+	}
+}
+
+func applyEnvFallbacks(cfg *agent.Config) {
+	if cfg.ServerAddr == "" {
+		cfg.ServerAddr = os.Getenv("SERVER_ADDR")
+	}
+	if cfg.Secret == "" {
+		cfg.Secret = os.Getenv("SECRET")
+	}
+	if v := os.Getenv("AGENT_NAME"); v != "" {
+		cfg.AgentName = v
+	}
+	if v := os.Getenv("AGENT_PROCESS_NAME"); v != "" {
+		cfg.AgentProcessName = v
+	}
+	if v := os.Getenv("REALM_PROCESS_NAME"); v != "" {
+		cfg.RealmProcessName = v
+	}
+	if v := os.Getenv("SERVICE_NAME"); v != "" {
+		cfg.ServiceName = v
+	}
+	if v := os.Getenv("INSTANCE"); v != "" {
+		cfg.InstanceName = v
+	}
+	if v := os.Getenv("INSTALL_DIR"); v != "" {
+		cfg.InstallDir = v
+	}
+	if v := os.Getenv("CONFIG_DIR"); v != "" {
+		cfg.ConfigDir = v
+	}
+	if v := os.Getenv("LOG_DIR"); v != "" {
+		cfg.LogDir = v
+	}
+	if v := os.Getenv("DATA_DIR"); v != "" {
+		cfg.DataDir = v
+	}
+	if v := os.Getenv("PID_FILE"); v != "" {
+		cfg.PidFile = v
+	}
+	if v := os.Getenv("MODE"); v != "" {
+		cfg.Mode = v
+	}
+	if v := os.Getenv("REALM_BINARY"); v != "" {
+		cfg.RealmBinaryPath = v
 	}
 }
