@@ -29,20 +29,18 @@
 
 面板端(稳定版)：
 ```bash
-curl -L https://raw.githubusercontent.com/imNebula/flux-panel-realm/refs/heads/main/panel_install.sh -o panel_install.sh && chmod +x panel_install.sh && ./panel_install.sh
+curl -fL https://raw.githubusercontent.com/imNebula/flux-panel-realm/refs/heads/main/panel_install.sh -o panel_install.sh && chmod +x panel_install.sh && ./panel_install.sh
 ```
 节点端(稳定版)：
 ```bash
-curl -L https://raw.githubusercontent.com/imNebula/flux-panel-realm/refs/heads/main/install.sh -o install.sh && chmod +x install.sh && ./install.sh install --server-addr 面板地址:端口 --secret 节点密钥
+curl -fL https://raw.githubusercontent.com/imNebula/flux-panel-realm/refs/heads/main/install.sh -o install.sh && chmod +x install.sh && ./install.sh install --server-addr 面板地址:端口 --secret 节点密钥
 ```
 
-面板端(开发版)：
+> 当前仓库未发布 `beta` 分支时，不要使用 `/refs/heads/beta/` 直链，否则会下载到 GitHub 的 404 文本。命令中的 `-f` 会在 404 时直接失败，避免把错误页面当脚本执行。
+
+如需固定安装某个 release/tag，可在运行脚本时指定版本：
 ```bash
-curl -L https://raw.githubusercontent.com/imNebula/flux-panel-realm/refs/heads/beta/panel_install.sh -o panel_install.sh && chmod +x panel_install.sh && ./panel_install.sh
-```
-节点端(开发版)：
-```bash
-curl -L https://raw.githubusercontent.com/imNebula/flux-panel-realm/refs/heads/beta/install.sh -o install.sh && chmod +x install.sh && ./install.sh install --server-addr 面板地址:端口 --secret 节点密钥
+VERSION=0.0.1-realm ./panel_install.sh
 ```
 
 #### 默认管理员账号

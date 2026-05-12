@@ -30,6 +30,8 @@ services:
     build:
       context: ./springboot-backend
       dockerfile: Dockerfile
+      args:
+        MAVEN_MIRROR_URL: ${MAVEN_MIRROR_URL:-https://maven.aliyun.com/repository/public}
     container_name: springboot-backend
     restart: unless-stopped
     environment:
@@ -61,6 +63,8 @@ services:
     build:
       context: ./vite-frontend
       dockerfile: Dockerfile
+      args:
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
     container_name: vite-frontend
     restart: unless-stopped
     ports:

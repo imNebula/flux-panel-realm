@@ -1,10 +1,17 @@
+# syntax=docker/dockerfile:1.7
 # 多阶段构建 - 构建阶段
 FROM node:20.19.0 AS builder
 
 WORKDIR /app
 
+ARG NPM_REGISTRY=https://registry.npmmirror.com
+ENV npm_config_registry=${NPM_REGISTRY} \
+    npm_config_audit=false \
+    npm_config_fund=false
+
 COPY package*.json ./
-RUN npm ci --legacy-peer-deps
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --legacy-peer-deps --prefer-offline --no-audit --fund=false
 
 COPY . .
 RUN npm run build

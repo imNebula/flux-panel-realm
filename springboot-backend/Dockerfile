@@ -1,9 +1,28 @@
+# syntax=docker/dockerfile:1.7
 # 构建阶段
 FROM maven:3.9.6-eclipse-temurin-21 AS build
 WORKDIR /app
+
+ARG MAVEN_MIRROR_URL=https://maven.aliyun.com/repository/public
+RUN mkdir -p /root/.m2 \
+    && printf '%s\n' \
+      '<settings>' \
+      '  <mirrors>' \
+      '    <mirror>' \
+      '      <id>configured-mirror</id>' \
+      '      <mirrorOf>*</mirrorOf>' \
+      "      <url>${MAVEN_MIRROR_URL}</url>" \
+      '    </mirror>' \
+      '  </mirrors>' \
+      '</settings>' > /root/.m2/settings.xml
+
 COPY pom.xml .
+RUN --mount=type=cache,target=/root/.m2/repository \
+    mvn -B -ntp -DskipTests dependency:go-offline
+
 COPY src ./src
-RUN mvn clean package -DskipTests
+RUN --mount=type=cache,target=/root/.m2/repository \
+    mvn -B -ntp clean package -DskipTests
 
 # 运行阶段
 FROM eclipse-temurin:21-jre

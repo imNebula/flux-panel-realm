@@ -8,24 +8,40 @@ export LC_ALL=C
 
 
 # 全局下载地址配置
-VERSION="${VERSION:-0.0.1-realm}"
+VERSION="${VERSION:-main}"
 CHANNEL="${CHANNEL:-stable}"
+PANEL_BRANCH="${PANEL_BRANCH:-main}"
+MAVEN_MIRROR_URL="${MAVEN_MIRROR_URL:-https://maven.aliyun.com/repository/public}"
+NPM_REGISTRY="${NPM_REGISTRY:-https://registry.npmmirror.com}"
 REPO_OWNER="imNebula"
 REPO_NAME="flux-panel-realm"
-RELEASE_BASE_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/${VERSION}"
-SOURCE_ARCHIVE_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}/archive/refs/tags/${VERSION}.tar.gz"
-DOCKER_COMPOSEV4_URL="${RELEASE_BASE_URL}/docker-compose-v4.yml"
-DOCKER_COMPOSEV6_URL="${RELEASE_BASE_URL}/docker-compose-v6.yml"
-REALM_SQL_URL="${RELEASE_BASE_URL}/realm.sql"
+
+set_branch_urls() {
+    local branch="$1"
+    SOURCE_ARCHIVE_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}/archive/refs/heads/${branch}.tar.gz"
+    DOCKER_COMPOSEV4_URL="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/refs/heads/${branch}/docker-compose-v4.yml"
+    DOCKER_COMPOSEV6_URL="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/refs/heads/${branch}/docker-compose-v6.yml"
+    REALM_SQL_URL="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/refs/heads/${branch}/realm.sql"
+}
+
+set_release_urls() {
+    local version="$1"
+    local release_base_url="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/${version}"
+    SOURCE_ARCHIVE_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}/archive/refs/tags/${version}.tar.gz"
+    DOCKER_COMPOSEV4_URL="${release_base_url}/docker-compose-v4.yml"
+    DOCKER_COMPOSEV6_URL="${release_base_url}/docker-compose-v6.yml"
+    REALM_SQL_URL="${release_base_url}/realm.sql"
+}
 
 if [[ "$CHANNEL" == "beta" || "$CHANNEL" == "dev" || "$CHANNEL" == "development" ]]; then
-    SOURCE_ARCHIVE_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}/archive/refs/heads/beta.tar.gz"
-    DOCKER_COMPOSEV4_URL="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/refs/heads/beta/docker-compose-v4.yml"
-    DOCKER_COMPOSEV6_URL="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/refs/heads/beta/docker-compose-v6.yml"
-    REALM_SQL_URL="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/refs/heads/beta/realm.sql"
+    set_branch_urls "beta"
+elif [[ "$VERSION" == "main" || "$VERSION" == "latest" ]]; then
+    set_branch_urls "$PANEL_BRANCH"
+else
+    set_release_urls "$VERSION"
 fi
 
-COUNTRY=$(curl -s https://ipinfo.io/country)
+COUNTRY=$(curl -fsSL --connect-timeout 3 https://ipinfo.io/country 2>/dev/null || true)
 if [ "$COUNTRY" = "CN" ]; then
     # 拼接 URL
     DOCKER_COMPOSEV4_URL="https://ghfast.top/${DOCKER_COMPOSEV4_URL}"
@@ -63,6 +79,20 @@ check_docker() {
   echo "检测到 Docker 命令：$DOCKER_CMD"
 }
 
+download_file() {
+  local url="$1"
+  local output="$2"
+  local label="${3:-文件}"
+
+  if ! curl --fail --location --show-error --connect-timeout 20 --retry 3 --retry-delay 2 -o "$output" "$url"; then
+    rm -f "$output"
+    echo "❌ 下载失败：$label"
+    echo "   URL: $url"
+    echo "   请检查版本/分支是否存在，或稍后重试。"
+    exit 1
+  fi
+}
+
 ensure_build_sources() {
   if [[ -f "springboot-backend/Dockerfile" && -f "vite-frontend/Dockerfile" ]]; then
     echo "✅ 已找到本地构建源码"
@@ -74,7 +104,7 @@ ensure_build_sources() {
   rm -rf "$TMP_SOURCE_DIR"
   mkdir -p "$TMP_SOURCE_DIR"
 
-  curl -L -o "$TMP_SOURCE_DIR/source.tar.gz" "$SOURCE_ARCHIVE_URL"
+  download_file "$SOURCE_ARCHIVE_URL" "$TMP_SOURCE_DIR/source.tar.gz" "面板源码"
   tar -xzf "$TMP_SOURCE_DIR/source.tar.gz" --strip-components=1 -C "$TMP_SOURCE_DIR"
 
   if [[ ! -d "$TMP_SOURCE_DIR/springboot-backend" || ! -d "$TMP_SOURCE_DIR/vite-frontend" ]]; then
@@ -242,7 +272,7 @@ install_panel() {
   echo "🔽 下载必要文件..."
   DOCKER_COMPOSE_URL=$(get_docker_compose_url)
   echo "📡 选择配置文件：$(basename "$DOCKER_COMPOSE_URL")"
-  curl -L -o docker-compose.yml "$DOCKER_COMPOSE_URL"
+  download_file "$DOCKER_COMPOSE_URL" docker-compose.yml "Docker Compose 配置"
   ensure_build_sources
 
   # 检查 realm.sql 是否已存在
@@ -250,7 +280,7 @@ install_panel() {
     echo "⏭️ 跳过下载: realm.sql (使用当前位置的文件)"
   else
     echo "📡 下载数据库初始化文件..."
-    curl -L -o realm.sql "$REALM_SQL_URL"
+    download_file "$REALM_SQL_URL" realm.sql "数据库初始化文件"
   fi
   echo "✅ 文件准备完成"
 
@@ -267,8 +297,11 @@ DB_PASSWORD=$DB_PASSWORD
 JWT_SECRET=$JWT_SECRET
 FRONTEND_PORT=$FRONTEND_PORT
 BACKEND_PORT=$BACKEND_PORT
+MAVEN_MIRROR_URL=$MAVEN_MIRROR_URL
+NPM_REGISTRY=$NPM_REGISTRY
 EOF
 
+  echo "🧭 构建依赖源：Maven=$MAVEN_MIRROR_URL，npm=$NPM_REGISTRY"
   echo "🚀 本地构建并启动 docker 服务..."
   $DOCKER_CMD up -d --build
 
@@ -290,7 +323,7 @@ update_panel() {
   echo "🔽 下载最新配置文件..."
   DOCKER_COMPOSE_URL=$(get_docker_compose_url)
   echo "📡 选择配置文件：$(basename "$DOCKER_COMPOSE_URL")"
-  curl -L -o docker-compose.yml "$DOCKER_COMPOSE_URL"
+  download_file "$DOCKER_COMPOSE_URL" docker-compose.yml "Docker Compose 配置"
   ensure_build_sources
   echo "✅ 下载完成"
 
@@ -1100,7 +1133,7 @@ uninstall_panel() {
     echo "⚠️ 未找到 docker-compose.yml 文件，正在下载以完成卸载..."
     DOCKER_COMPOSE_URL=$(get_docker_compose_url)
     echo "📡 选择配置文件：$(basename "$DOCKER_COMPOSE_URL")"
-    curl -L -o docker-compose.yml "$DOCKER_COMPOSE_URL"
+    download_file "$DOCKER_COMPOSE_URL" docker-compose.yml "Docker Compose 配置"
     echo "✅ docker-compose.yml 下载完成"
   fi
 
