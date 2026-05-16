@@ -8,17 +8,21 @@ export LC_ALL=C
 
 
 # 全局下载地址配置
+VERSION_USER_SET="${VERSION+x}"
+CHANNEL_USER_SET="${CHANNEL+x}"
+PANEL_IMAGE_REGISTRY_USER_SET="${PANEL_IMAGE_REGISTRY+x}"
+PANEL_IMAGE_TAG_USER_SET="${PANEL_IMAGE_TAG+x}"
+
 VERSION="${VERSION:-main}"
 CHANNEL="${CHANNEL:-stable}"
 PANEL_BRANCH="${PANEL_BRANCH:-main}"
-MAVEN_MIRROR_URL="${MAVEN_MIRROR_URL:-https://maven.aliyun.com/repository/public}"
-NPM_REGISTRY="${NPM_REGISTRY:-https://registry.npmmirror.com}"
+PANEL_IMAGE_REGISTRY="${PANEL_IMAGE_REGISTRY:-ghcr.io/imNebula/flux-panel-realm}"
+PANEL_IMAGE_TAG="${PANEL_IMAGE_TAG:-}"
 REPO_OWNER="imNebula"
 REPO_NAME="flux-panel-realm"
 
 set_branch_urls() {
     local branch="$1"
-    SOURCE_ARCHIVE_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}/archive/refs/heads/${branch}.tar.gz"
     DOCKER_COMPOSEV4_URL="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/refs/heads/${branch}/docker-compose-v4.yml"
     DOCKER_COMPOSEV6_URL="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/refs/heads/${branch}/docker-compose-v6.yml"
     REALM_SQL_URL="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/refs/heads/${branch}/realm.sql"
@@ -27,15 +31,72 @@ set_branch_urls() {
 set_release_urls() {
     local version="$1"
     local release_base_url="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/${version}"
-    SOURCE_ARCHIVE_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}/archive/refs/tags/${version}.tar.gz"
     DOCKER_COMPOSEV4_URL="${release_base_url}/docker-compose-v4.yml"
     DOCKER_COMPOSEV6_URL="${release_base_url}/docker-compose-v6.yml"
     REALM_SQL_URL="${release_base_url}/realm.sql"
 }
 
-if [[ "$CHANNEL" == "beta" || "$CHANNEL" == "dev" || "$CHANNEL" == "development" ]]; then
-    set_branch_urls "beta"
-elif [[ "$VERSION" == "main" || "$VERSION" == "latest" ]]; then
+resolve_panel_image_tag() {
+  if [[ -n "$PANEL_IMAGE_TAG_USER_SET" ]]; then
+    return 0
+  fi
+
+  if [[ "$VERSION" != "main" && "$VERSION" != "latest" ]]; then
+    PANEL_IMAGE_TAG="$VERSION"
+  elif [[ "$CHANNEL" == "beta" || "$CHANNEL" == "dev" || "$CHANNEL" == "development" || "$CHANNEL" == "test" ]]; then
+    PANEL_IMAGE_TAG="development"
+  else
+    PANEL_IMAGE_TAG="stable"
+  fi
+}
+
+load_existing_panel_env() {
+  if [[ ! -f .env ]]; then
+    return 0
+  fi
+
+  if [[ -z "$PANEL_IMAGE_REGISTRY_USER_SET" ]]; then
+    local existing_registry
+    existing_registry=$(grep "^PANEL_IMAGE_REGISTRY=" .env 2>/dev/null | tail -n 1 | cut -d'=' -f2- || true)
+    if [[ -n "$existing_registry" ]]; then
+      PANEL_IMAGE_REGISTRY="$existing_registry"
+    fi
+  fi
+
+  if [[ -z "$PANEL_IMAGE_TAG_USER_SET" && -z "$VERSION_USER_SET" && -z "$CHANNEL_USER_SET" ]]; then
+    local existing_tag
+    existing_tag=$(grep "^PANEL_IMAGE_TAG=" .env 2>/dev/null | tail -n 1 | cut -d'=' -f2- || true)
+    if [[ -n "$existing_tag" ]]; then
+      PANEL_IMAGE_TAG="$existing_tag"
+      PANEL_IMAGE_TAG_USER_SET="from_env"
+    fi
+  fi
+}
+
+ensure_env_value() {
+  local key="$1"
+  local value="$2"
+
+  if [[ -f .env ]] && grep -q "^${key}=" .env; then
+    local tmp_file
+    tmp_file=$(mktemp)
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      if [[ "$line" == "${key}="* ]]; then
+        printf '%s=%s\n' "$key" "$value"
+      else
+        printf '%s\n' "$line"
+      fi
+    done < .env > "$tmp_file"
+    mv "$tmp_file" .env
+  else
+    printf '%s=%s\n' "$key" "$value" >> .env
+  fi
+}
+
+load_existing_panel_env
+resolve_panel_image_tag
+
+if [[ "$VERSION" == "main" || "$VERSION" == "latest" ]]; then
     set_branch_urls "$PANEL_BRANCH"
 else
     set_release_urls "$VERSION"
@@ -47,7 +108,6 @@ if [ "$COUNTRY" = "CN" ]; then
     DOCKER_COMPOSEV4_URL="https://ghfast.top/${DOCKER_COMPOSEV4_URL}"
     DOCKER_COMPOSEV6_URL="https://ghfast.top/${DOCKER_COMPOSEV6_URL}"
     REALM_SQL_URL="https://ghfast.top/${REALM_SQL_URL}"
-    SOURCE_ARCHIVE_URL="https://ghfast.top/${SOURCE_ARCHIVE_URL}"
 fi
 
 
@@ -91,38 +151,6 @@ download_file() {
     echo "   请检查版本/分支是否存在，或稍后重试。"
     exit 1
   fi
-}
-
-ensure_build_sources() {
-  if [[ -f "springboot-backend/Dockerfile" && -f "vite-frontend/Dockerfile" ]]; then
-    echo "✅ 已找到本地构建源码"
-    return 0
-  fi
-
-  echo "🔽 下载面板源码用于本地构建..."
-  TMP_SOURCE_DIR=".flux-panel-source"
-  rm -rf "$TMP_SOURCE_DIR"
-  mkdir -p "$TMP_SOURCE_DIR"
-
-  download_file "$SOURCE_ARCHIVE_URL" "$TMP_SOURCE_DIR/source.tar.gz" "面板源码"
-  tar -xzf "$TMP_SOURCE_DIR/source.tar.gz" --strip-components=1 -C "$TMP_SOURCE_DIR"
-
-  if [[ ! -d "$TMP_SOURCE_DIR/springboot-backend" || ! -d "$TMP_SOURCE_DIR/vite-frontend" ]]; then
-    echo "❌ 源码包不完整，缺少 springboot-backend 或 vite-frontend"
-    rm -rf "$TMP_SOURCE_DIR"
-    exit 1
-  fi
-
-  rm -rf springboot-backend vite-frontend
-  cp -R "$TMP_SOURCE_DIR/springboot-backend" ./springboot-backend
-  cp -R "$TMP_SOURCE_DIR/vite-frontend" ./vite-frontend
-
-  if [[ ! -f "realm.sql" && -f "$TMP_SOURCE_DIR/realm.sql" ]]; then
-    cp "$TMP_SOURCE_DIR/realm.sql" ./realm.sql
-  fi
-
-  rm -rf "$TMP_SOURCE_DIR"
-  echo "✅ 本地构建源码准备完成"
 }
 
 # 检测系统是否支持 IPv6
@@ -273,7 +301,6 @@ install_panel() {
   DOCKER_COMPOSE_URL=$(get_docker_compose_url)
   echo "📡 选择配置文件：$(basename "$DOCKER_COMPOSE_URL")"
   download_file "$DOCKER_COMPOSE_URL" docker-compose.yml "Docker Compose 配置"
-  ensure_build_sources
 
   # 检查 realm.sql 是否已存在
   if [[ -f "realm.sql" ]]; then
@@ -297,13 +324,15 @@ DB_PASSWORD=$DB_PASSWORD
 JWT_SECRET=$JWT_SECRET
 FRONTEND_PORT=$FRONTEND_PORT
 BACKEND_PORT=$BACKEND_PORT
-MAVEN_MIRROR_URL=$MAVEN_MIRROR_URL
-NPM_REGISTRY=$NPM_REGISTRY
+PANEL_IMAGE_REGISTRY=$PANEL_IMAGE_REGISTRY
+PANEL_IMAGE_TAG=$PANEL_IMAGE_TAG
 EOF
 
-  echo "🧭 构建依赖源：Maven=$MAVEN_MIRROR_URL，npm=$NPM_REGISTRY"
-  echo "🚀 本地构建并启动 docker 服务..."
-  $DOCKER_CMD up -d --build
+  echo "📦 镜像源：${PANEL_IMAGE_REGISTRY}，标签：${PANEL_IMAGE_TAG}"
+  echo "📦 拉取预构建 Docker 镜像..."
+  $DOCKER_CMD pull
+  echo "🚀 启动 docker 服务..."
+  $DOCKER_CMD up -d
 
   echo "🎉 部署完成"
   echo "🌐 访问地址: http://服务器IP:$FRONTEND_PORT"
@@ -324,7 +353,6 @@ update_panel() {
   DOCKER_COMPOSE_URL=$(get_docker_compose_url)
   echo "📡 选择配置文件：$(basename "$DOCKER_COMPOSE_URL")"
   download_file "$DOCKER_COMPOSE_URL" docker-compose.yml "Docker Compose 配置"
-  ensure_build_sources
   echo "✅ 下载完成"
 
   # 自动检测并配置 IPv6 支持
@@ -333,11 +361,18 @@ update_panel() {
     configure_docker_ipv6
   fi
 
+  ensure_env_value "PANEL_IMAGE_REGISTRY" "$PANEL_IMAGE_REGISTRY"
+  ensure_env_value "PANEL_IMAGE_TAG" "$PANEL_IMAGE_TAG"
+
+  echo "📦 镜像源：${PANEL_IMAGE_REGISTRY}，标签：${PANEL_IMAGE_TAG}"
+  echo "📦 拉取更新后的预构建 Docker 镜像..."
+  $DOCKER_CMD pull
+
   echo "🛑 停止当前服务..."
   $DOCKER_CMD down
 
-  echo "🚀 本地构建并启动更新后的服务..."
-  $DOCKER_CMD up -d --build
+  echo "🚀 启动更新后的服务..."
+  $DOCKER_CMD up -d
 
   # 等待服务启动
   echo "⏳ 等待服务启动..."

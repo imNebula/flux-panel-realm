@@ -1,33 +1,39 @@
-name: Auto Build and Release
+name: Manual Release
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
+    inputs:
+      version:
+        description: Release version, for example 0.0.2-realm or 0.0.2-realm-dev.1
+        required: true
+        type: string
+      channel:
+        description: Release channel
+        required: true
+        type: choice
+        options:
+          - stable
+          - development
 
 permissions:
   contents: write
   packages: write
 
 env:
-  VERSION: "0.0.1-realm"
   REGISTRY: ghcr.io
   BACKEND_IMAGE: ghcr.io/${{ github.repository }}/springboot-backend
   FRONTEND_IMAGE: ghcr.io/${{ github.repository }}/vite-frontend
 
 jobs:
   prepare:
-    name: Resolve Release Channel
+    name: Prepare Release
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.meta.outputs.version }}
-      base_version: ${{ steps.meta.outputs.base_version }}
-      channel: ${{ steps.meta.outputs.channel }}
       prerelease: ${{ steps.meta.outputs.prerelease }}
-      latest_flag: ${{ steps.meta.outputs.latest_flag }}
       backend_tags: ${{ steps.meta.outputs.backend_tags }}
       frontend_tags: ${{ steps.meta.outputs.frontend_tags }}
+      latest_flag: ${{ steps.meta.outputs.latest_flag }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -36,36 +42,43 @@ jobs:
       - name: Resolve release metadata
         id: meta
         run: |
-          BASE_VERSION="${VERSION}"
-          SHORT_SHA="${GITHUB_SHA::7}"
+          VERSION="${{ inputs.version }}"
+          CHANNEL="${{ inputs.channel }}"
 
-          if [[ -z "$BASE_VERSION" ]]; then
-            echo "VERSION is required" >&2
+          if [[ -z "$VERSION" ]]; then
+            echo "version is required" >&2
             exit 1
           fi
 
-          git fetch --tags --force
+          if git rev-parse "$VERSION" >/dev/null 2>&1; then
+            echo "Tag $VERSION already exists" >&2
+            exit 1
+          fi
 
-          if git rev-parse -q --verify "refs/tags/${BASE_VERSION}" >/dev/null; then
-            CHANNEL="development"
-            RELEASE_VERSION="${BASE_VERSION}-dev.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
-            PRERELEASE="true"
-            LATEST_FLAG="--latest=false"
-            BACKEND_TAGS="${BACKEND_IMAGE}:${RELEASE_VERSION}"$'\n'"${BACKEND_IMAGE}:development"$'\n'"${BACKEND_IMAGE}:dev"$'\n'"${BACKEND_IMAGE}:sha-${SHORT_SHA}"
-            FRONTEND_TAGS="${FRONTEND_IMAGE}:${RELEASE_VERSION}"$'\n'"${FRONTEND_IMAGE}:development"$'\n'"${FRONTEND_IMAGE}:dev"$'\n'"${FRONTEND_IMAGE}:sha-${SHORT_SHA}"
-          else
-            CHANNEL="stable"
-            RELEASE_VERSION="${BASE_VERSION}"
+          if [[ "$CHANNEL" == "stable" && "$VERSION" =~ (dev|beta|alpha|rc) ]]; then
+            echo "Stable releases should not use prerelease-looking versions" >&2
+            exit 1
+          fi
+
+          if [[ "$CHANNEL" == "development" && ! "$VERSION" =~ (dev|beta|alpha|rc) ]]; then
+            echo "Development releases should include dev, beta, alpha, or rc in the version" >&2
+            exit 1
+          fi
+
+          if [[ "$CHANNEL" == "stable" ]]; then
             PRERELEASE="false"
             LATEST_FLAG="--latest"
-            BACKEND_TAGS="${BACKEND_IMAGE}:${RELEASE_VERSION}"$'\n'"${BACKEND_IMAGE}:stable"$'\n'"${BACKEND_IMAGE}:latest"$'\n'"${BACKEND_IMAGE}:sha-${SHORT_SHA}"
-            FRONTEND_TAGS="${FRONTEND_IMAGE}:${RELEASE_VERSION}"$'\n'"${FRONTEND_IMAGE}:stable"$'\n'"${FRONTEND_IMAGE}:latest"$'\n'"${FRONTEND_IMAGE}:sha-${SHORT_SHA}"
+            BACKEND_TAGS="${BACKEND_IMAGE}:${VERSION}"$'\n'"${BACKEND_IMAGE}:stable"$'\n'"${BACKEND_IMAGE}:latest"
+            FRONTEND_TAGS="${FRONTEND_IMAGE}:${VERSION}"$'\n'"${FRONTEND_IMAGE}:stable"$'\n'"${FRONTEND_IMAGE}:latest"
+          else
+            PRERELEASE="true"
+            LATEST_FLAG="--latest=false"
+            BACKEND_TAGS="${BACKEND_IMAGE}:${VERSION}"$'\n'"${BACKEND_IMAGE}:development"$'\n'"${BACKEND_IMAGE}:dev"
+            FRONTEND_TAGS="${FRONTEND_IMAGE}:${VERSION}"$'\n'"${FRONTEND_IMAGE}:development"$'\n'"${FRONTEND_IMAGE}:dev"
           fi
 
           {
-            echo "version=${RELEASE_VERSION}"
-            echo "base_version=${BASE_VERSION}"
-            echo "channel=${CHANNEL}"
+            echo "version=${VERSION}"
             echo "prerelease=${PRERELEASE}"
             echo "latest_flag=${LATEST_FLAG}"
             echo "backend_tags<<EOF"
@@ -76,10 +89,8 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
-          echo "Resolved ${CHANNEL} release: ${RELEASE_VERSION}"
-
   build-images:
-    name: Build and Push Panel Images
+    name: Build and Push Release Images
     runs-on: ubuntu-latest
     needs: prepare
     steps:
@@ -119,7 +130,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=frontend
 
   build-agent:
-    name: Build and Compress Realm Agent
+    name: Build and Compress Realm Agent Binary
     runs-on: ubuntu-latest
     needs: prepare
     steps:
@@ -185,7 +196,7 @@ jobs:
           path: ./realm-agent/flux-realm-agent-armv7
 
   create-release:
-    name: Publish Release Assets
+    name: Create GitHub Release
     runs-on: ubuntu-latest
     needs:
       - prepare
@@ -217,14 +228,12 @@ jobs:
       - name: Create release and upload assets
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
-          BASE_VERSION: ${{ needs.prepare.outputs.base_version }}
-          CHANNEL: ${{ needs.prepare.outputs.channel }}
+          VERSION: ${{ needs.prepare.outputs.version }}
           PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
           LATEST_FLAG: ${{ needs.prepare.outputs.latest_flag }}
         run: |
-          git tag "$RELEASE_VERSION" "$GITHUB_SHA"
-          git push origin "$RELEASE_VERSION"
+          git tag "$VERSION" "$GITHUB_SHA"
+          git push origin "$VERSION"
 
           COMMIT_MSG=$(git log -1 --pretty=format:"%s")
           COMMIT_AUTHOR=$(git log -1 --pretty=format:"%an")
@@ -235,29 +244,25 @@ jobs:
             RELEASE_FLAGS="--prerelease $RELEASE_FLAGS"
           fi
 
-          gh release create "$RELEASE_VERSION" \
-            --title "Release ${RELEASE_VERSION}" \
+          gh release create "$VERSION" \
+            --title "Release ${VERSION}" \
             $RELEASE_FLAGS \
-            --notes "## Release Channel
-          - Channel: ${CHANNEL}
-          - Base Version: ${BASE_VERSION}
-
-          ## Commit Information
+            --notes "## Commit Information
           - Message: ${COMMIT_MSG}
           - Author: ${COMMIT_AUTHOR}
           - Date: ${COMMIT_DATE}
           - Commit: ${GITHUB_SHA:0:7}
 
           ## Docker Images
-          - ${BACKEND_IMAGE}:${RELEASE_VERSION}
-          - ${FRONTEND_IMAGE}:${RELEASE_VERSION}" \
+          - ${BACKEND_IMAGE}:${VERSION}
+          - ${FRONTEND_IMAGE}:${VERSION}" \
             --repo "${{ github.repository }}"
 
-          gh release upload "$RELEASE_VERSION" ./artifacts/flux-realm-agent-amd64 --clobber
-          gh release upload "$RELEASE_VERSION" ./artifacts/flux-realm-agent-arm64 --clobber
-          gh release upload "$RELEASE_VERSION" ./artifacts/flux-realm-agent-armv7 --clobber
-          gh release upload "$RELEASE_VERSION" ./install.sh --clobber
-          gh release upload "$RELEASE_VERSION" ./panel_install.sh --clobber
-          gh release upload "$RELEASE_VERSION" ./docker-compose-v4.yml --clobber
-          gh release upload "$RELEASE_VERSION" ./docker-compose-v6.yml --clobber
-          gh release upload "$RELEASE_VERSION" ./realm.sql --clobber
+          gh release upload "$VERSION" ./artifacts/flux-realm-agent-amd64 --clobber
+          gh release upload "$VERSION" ./artifacts/flux-realm-agent-arm64 --clobber
+          gh release upload "$VERSION" ./artifacts/flux-realm-agent-armv7 --clobber
+          gh release upload "$VERSION" ./install.sh --clobber
+          gh release upload "$VERSION" ./panel_install.sh --clobber
+          gh release upload "$VERSION" ./docker-compose-v4.yml --clobber
+          gh release upload "$VERSION" ./docker-compose-v6.yml --clobber
+          gh release upload "$VERSION" ./realm.sql --clobber

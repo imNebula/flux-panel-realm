@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+AGENT_VERSION_USER_SET="${AGENT_VERSION+x}"
+AGENT_CHANNEL_USER_SET="${AGENT_CHANNEL+x}"
+
 REALM_VERSION="${REALM_VERSION:-v2.9.2-2}"
 AGENT_VERSION="${AGENT_VERSION:-latest}"
+AGENT_CHANNEL="${AGENT_CHANNEL:-stable}"
 REPO_OWNER="${REPO_OWNER:-imNebula}"
 REPO_NAME="${REPO_NAME:-flux-panel-realm}"
 SERVER_ADDR=""
@@ -39,6 +43,7 @@ Options:
   --log-dir DIR
   --instance NAME
   --mode single|per-tunnel|per-forward
+  --channel stable|development
   --no-system-service
   --foreground
   --china-mirror
@@ -59,6 +64,7 @@ while [[ $# -gt 0 ]]; do
     --log-dir) LOG_DIR="$2"; shift 2 ;;
     --instance) INSTANCE="$2"; shift 2 ;;
     --mode) MODE="$2"; shift 2 ;;
+    --channel) AGENT_CHANNEL="$2"; AGENT_CHANNEL_USER_SET="cli"; shift 2 ;;
     --no-system-service) NO_SYSTEM_SERVICE=1; shift ;;
     --foreground) FOREGROUND=1; shift ;;
     --china-mirror) CHINA_MIRROR=1; shift ;;
@@ -79,6 +85,38 @@ need_root() {
 }
 
 cmd_exists() { command -v "$1" >/dev/null 2>&1; }
+
+read_env_value() {
+  local key="$1"
+  sed -n "s/^${key}='\\(.*\\)'$/\\1/p" "$ENV_FILE" 2>/dev/null | tail -n 1
+}
+
+load_existing_env() {
+  if [[ ! -f "$ENV_FILE" ]]; then
+    return 0
+  fi
+
+  if [[ -z "$SERVER_ADDR" ]]; then
+    SERVER_ADDR="$(read_env_value SERVER_ADDR)"
+  fi
+  if [[ -z "$SECRET" ]]; then
+    SECRET="$(read_env_value SECRET)"
+  fi
+  if [[ -z "$AGENT_VERSION_USER_SET" ]]; then
+    local existing_agent_version
+    existing_agent_version="$(read_env_value AGENT_VERSION)"
+    if [[ -n "$existing_agent_version" ]]; then
+      AGENT_VERSION="$existing_agent_version"
+    fi
+  fi
+  if [[ -z "$AGENT_CHANNEL_USER_SET" ]]; then
+    local existing_agent_channel
+    existing_agent_channel="$(read_env_value AGENT_CHANNEL)"
+    if [[ -n "$existing_agent_channel" ]]; then
+      AGENT_CHANNEL="$existing_agent_channel"
+    fi
+  fi
+}
 
 detect_arch() {
   case "$(uname -m)" in
@@ -122,6 +160,34 @@ agent_asset() {
   esac
 }
 
+latest_development_release() {
+  local api data tag
+  api="https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases"
+  if cmd_exists curl; then
+    data="$(curl -fsSL "$api")"
+  elif cmd_exists wget; then
+    data="$(wget -qO- "$api")"
+  else
+    echo "curl or wget is required." >&2
+    exit 1
+  fi
+
+  tag="$(printf '%s\n' "$data" \
+    | awk -F'"' '
+        /"tag_name":[[:space:]]*"/ { tag = $4 }
+        /"prerelease":[[:space:]]*true/ && tag ~ /(dev|beta|alpha|rc)/ {
+          print tag
+          exit
+        }
+      ')"
+
+  if [[ -z "$tag" ]]; then
+    echo "No development release found for ${REPO_OWNER}/${REPO_NAME}." >&2
+    exit 1
+  fi
+  echo "$tag"
+}
+
 download() {
   local url="$1" out="$2"
   if [[ "$CHINA_MIRROR" == "1" ]]; then
@@ -157,7 +223,7 @@ install_realm() {
 }
 
 install_agent() {
-  local asset release_path
+  local asset release_path resolved_agent_version
   if [[ -n "$AGENT_URL" ]]; then
     download "$AGENT_URL" "${INSTALL_DIR}/flux-realm-agent"
     chmod 0755 "${INSTALL_DIR}/flux-realm-agent"
@@ -172,7 +238,13 @@ install_agent() {
     return
   fi
   asset="$(agent_asset)"
-  if [[ "$AGENT_VERSION" == "latest" ]]; then
+  if [[ "$AGENT_VERSION" =~ ^(development|dev|test|beta)$ ]]; then
+    resolved_agent_version="$(latest_development_release)"
+    release_path="download/${resolved_agent_version}"
+  elif [[ "$AGENT_VERSION" == "latest" && "$AGENT_CHANNEL" =~ ^(development|dev|test|beta)$ ]]; then
+    resolved_agent_version="$(latest_development_release)"
+    release_path="download/${resolved_agent_version}"
+  elif [[ "$AGENT_VERSION" == "latest" ]]; then
     release_path="latest/download"
   else
     release_path="download/${AGENT_VERSION}"
@@ -187,6 +259,8 @@ write_env() {
 SERVER_ADDR='${SERVER_ADDR}'
 SECRET='${SECRET}'
 AGENT_NAME='${AGENT_NAME}'
+AGENT_VERSION='${AGENT_VERSION}'
+AGENT_CHANNEL='${AGENT_CHANNEL}'
 AGENT_PROCESS_NAME='${AGENT_PROCESS_NAME}'
 REALM_PROCESS_NAME='${REALM_PROCESS_NAME}'
 SERVICE_NAME='${SERVICE_NAME}'
@@ -357,6 +431,8 @@ do_status() {
   fi
   if cmd_exists systemctl; then systemctl status "${SERVICE_NAME}" --no-pager 2>/dev/null || true; fi
 }
+
+load_existing_env
 
 case "$ACTION" in
   install|update) do_install ;;

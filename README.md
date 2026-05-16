@@ -27,7 +27,7 @@
 
 > 节点段建议使用面板快速生成
 
-面板端(稳定版)：
+面板端(稳定版，拉取 GitHub 预构建镜像，不在服务器编译)：
 ```bash
 curl -fL https://raw.githubusercontent.com/imNebula/flux-panel-realm/refs/heads/main/panel_install.sh -o panel_install.sh && chmod +x panel_install.sh && ./panel_install.sh
 ```
@@ -36,11 +36,30 @@ curl -fL https://raw.githubusercontent.com/imNebula/flux-panel-realm/refs/heads/
 curl -fL https://raw.githubusercontent.com/imNebula/flux-panel-realm/refs/heads/main/install.sh -o install.sh && chmod +x install.sh && ./install.sh install --server-addr 面板地址:端口 --secret 节点密钥
 ```
 
-> 当前仓库未发布 `beta` 分支时，不要使用 `/refs/heads/beta/` 直链，否则会下载到 GitHub 的 404 文本。命令中的 `-f` 会在 404 时直接失败，避免把错误页面当脚本执行。
+面板安装只需要 Docker / Docker Compose，并且服务器需要能访问 GitHub Release 和 GHCR 镜像仓库。每次推送到 `main` 都会自动编译面板镜像和节点端 Agent：如果 `.github/workflows/docker-build.yml` 中的 `VERSION` 尚未发布过，则生成稳定版；如果该版本号已经存在，则自动生成 `VERSION-dev.<run_number>.<attempt>` 开发/测试版。
 
 如需固定安装某个 release/tag，可在运行脚本时指定版本：
 ```bash
 VERSION=0.0.1-realm ./panel_install.sh
+```
+
+如需安装开发版：
+```bash
+CHANNEL=development ./panel_install.sh
+```
+或指定开发版 release：
+```bash
+VERSION=0.0.1-realm-dev.1 ./panel_install.sh
+```
+
+节点端如需安装最新开发版 Agent：
+```bash
+AGENT_CHANNEL=development ./install.sh install --server-addr 面板地址:端口 --secret 节点密钥
+```
+
+如需使用自定义镜像仓库或标签：
+```bash
+PANEL_IMAGE_REGISTRY=your.registry/flux-panel-realm PANEL_IMAGE_TAG=0.0.1-realm ./panel_install.sh
 ```
 
 #### 默认管理员账号
