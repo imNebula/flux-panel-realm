@@ -21,8 +21,6 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  BACKEND_IMAGE: ghcr.io/${{ github.repository }}/springboot-backend
-  FRONTEND_IMAGE: ghcr.io/${{ github.repository }}/vite-frontend
 
 jobs:
   prepare:
@@ -34,6 +32,8 @@ jobs:
       backend_tags: ${{ steps.meta.outputs.backend_tags }}
       frontend_tags: ${{ steps.meta.outputs.frontend_tags }}
       latest_flag: ${{ steps.meta.outputs.latest_flag }}
+      backend_image: ${{ steps.meta.outputs.backend_image }}
+      frontend_image: ${{ steps.meta.outputs.frontend_image }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -44,6 +44,9 @@ jobs:
         run: |
           VERSION="${{ inputs.version }}"
           CHANNEL="${{ inputs.channel }}"
+          IMAGE_REPO="${GITHUB_REPOSITORY,,}"
+          BACKEND_IMAGE="${REGISTRY}/${IMAGE_REPO}/springboot-backend"
+          FRONTEND_IMAGE="${REGISTRY}/${IMAGE_REPO}/vite-frontend"
 
           if [[ -z "$VERSION" ]]; then
             echo "version is required" >&2
@@ -81,6 +84,8 @@ jobs:
             echo "version=${VERSION}"
             echo "prerelease=${PRERELEASE}"
             echo "latest_flag=${LATEST_FLAG}"
+            echo "backend_image=${BACKEND_IMAGE}"
+            echo "frontend_image=${FRONTEND_IMAGE}"
             echo "backend_tags<<EOF"
             echo "$BACKEND_TAGS"
             echo "EOF"
@@ -231,6 +236,8 @@ jobs:
           VERSION: ${{ needs.prepare.outputs.version }}
           PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
           LATEST_FLAG: ${{ needs.prepare.outputs.latest_flag }}
+          BACKEND_IMAGE: ${{ needs.prepare.outputs.backend_image }}
+          FRONTEND_IMAGE: ${{ needs.prepare.outputs.frontend_image }}
         run: |
           git tag "$VERSION" "$GITHUB_SHA"
           git push origin "$VERSION"
