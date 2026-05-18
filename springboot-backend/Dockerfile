@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 # 构建阶段
-FROM maven:3.9.6-eclipse-temurin-21 AS build
+FROM --platform=$BUILDPLATFORM maven:3.9.6-eclipse-temurin-21 AS build
 WORKDIR /app
 
 ARG MAVEN_MIRROR_URL=https://maven.aliyun.com/repository/public
@@ -25,7 +25,7 @@ RUN --mount=type=cache,target=/root/.m2/repository \
     mvn -B -ntp clean package -DskipTests
 
 # 运行阶段
-FROM eclipse-temurin:21-jre
+FROM --platform=$TARGETPLATFORM eclipse-temurin:21-jre
 WORKDIR /app
 ENV JAVA_OPTS="-Xmx512m -Xms256m -Dfile.encoding=UTF-8 -Duser.timezone=Asia/Shanghai"
 ENV LANG=en_US.UTF-8

@@ -21,6 +21,7 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
+  IMAGE_PLATFORMS: linux/amd64,linux/arm64
 
 jobs:
   prepare:
@@ -94,8 +95,8 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
-  build-images:
-    name: Build and Push Release Images
+  build-backend-image:
+    name: Build and Push Backend Image
     runs-on: ubuntu-latest
     needs: prepare
     steps:
@@ -118,17 +119,37 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: ./springboot-backend
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ env.IMAGE_PLATFORMS }}
           push: true
           tags: ${{ needs.prepare.outputs.backend_tags }}
           cache-from: type=gha,scope=backend
           cache-to: type=gha,mode=max,scope=backend
 
+  build-frontend-image:
+    name: Build and Push Frontend Image
+    runs-on: ubuntu-latest
+    needs: prepare
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Build and push frontend image
         uses: docker/build-push-action@v6
         with:
           context: ./vite-frontend
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ env.IMAGE_PLATFORMS }}
           push: true
           tags: ${{ needs.prepare.outputs.frontend_tags }}
           cache-from: type=gha,scope=frontend
@@ -205,7 +226,8 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - prepare
-      - build-images
+      - build-backend-image
+      - build-frontend-image
       - build-agent
     steps:
       - uses: actions/checkout@v4
@@ -270,6 +292,7 @@ jobs:
           gh release upload "$VERSION" ./artifacts/flux-realm-agent-armv7 --clobber
           gh release upload "$VERSION" ./install.sh --clobber
           gh release upload "$VERSION" ./panel_install.sh --clobber
+          gh release upload "$VERSION" ./panel_uninstall.sh --clobber
           gh release upload "$VERSION" ./docker-compose-v4.yml --clobber
           gh release upload "$VERSION" ./docker-compose-v6.yml --clobber
           gh release upload "$VERSION" ./realm.sql --clobber

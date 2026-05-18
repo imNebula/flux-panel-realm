@@ -36,7 +36,7 @@ curl -fL https://raw.githubusercontent.com/imNebula/flux-panel-realm/refs/heads/
 curl -fL https://raw.githubusercontent.com/imNebula/flux-panel-realm/refs/heads/main/install.sh -o install.sh && chmod +x install.sh && ./install.sh install --server-addr 面板地址:端口 --secret 节点密钥
 ```
 
-面板安装只需要 Docker / Docker Compose，并且服务器需要能访问 GitHub Release 和 GHCR 镜像仓库。每次推送到 `main` 都会自动编译面板镜像和节点端 Agent：如果 `.github/workflows/docker-build.yml` 中的 `VERSION` 尚未发布过，则生成稳定版；如果该版本号已经存在，则自动生成 `VERSION-dev.<run_number>.<attempt>` 开发/测试版。
+面板安装只需要 Docker / Docker Compose，并且服务器需要能访问 GitHub Release 和 GHCR 镜像仓库。每次推送到 `main` 都会自动编译并发布开发/测试版，版本格式为 `VERSION-dev.<run_number>.<attempt>`；自动开发版面板镜像默认只推送 `linux/amd64` 以缩短构建时间，正式稳定版通过 GitHub Actions 的 `Manual Release` 手动发版，并更新多架构 `stable/latest` 镜像标签。
 
 如需固定安装某个 release/tag，可在运行脚本时指定版本：
 ```bash
@@ -60,6 +60,16 @@ AGENT_CHANNEL=development ./install.sh install --server-addr 面板地址:端口
 如需使用自定义镜像仓库或标签：
 ```bash
 PANEL_IMAGE_REGISTRY=your.registry/flux-panel-realm PANEL_IMAGE_TAG=0.0.1-realm ./panel_install.sh
+```
+
+快速卸载面板，默认保留数据库和日志卷：
+```bash
+curl -fL https://raw.githubusercontent.com/imNebula/flux-panel-realm/refs/heads/main/panel_uninstall.sh -o panel_uninstall.sh && chmod +x panel_uninstall.sh && ./panel_uninstall.sh
+```
+
+如需同时删除数据库、日志卷、镜像和本地配置文件：
+```bash
+./panel_uninstall.sh --all
 ```
 
 #### 默认管理员账号
